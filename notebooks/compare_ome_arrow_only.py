@@ -36,12 +36,12 @@ from ome_arrow import OMEArrow
 pd.set_option("display.precision", 4)
 PLOT_TITLE = (__doc__ or "OME-Arrow single-column benchmarks").splitlines()[0]
 DATA_DIR = Path("data")
-shutil.rmtree(DATA_DIR, ignore_errors=True)
 DATA_DIR.mkdir(exist_ok=True)
 IMAGES_DIR = Path("images")
 IMAGES_DIR.mkdir(exist_ok=True)
-SUMMARY_CSV = DATA_DIR / "compare_ome_arrow_only_summary.csv"
-RUNS_CSV = DATA_DIR / "compare_ome_arrow_only_runs.csv"
+SUMMARY_PARQUET = DATA_DIR / "compare_ome_arrow_only_summary.parquet"
+RUNS_PARQUET = DATA_DIR / "compare_ome_arrow_only_runs.parquet"
+RUN_BENCHMARKS = not (SUMMARY_PARQUET.exists() and RUNS_PARQUET.exists())
 
 N_ROWS = 1_000
 OME_SHAPE = (100, 100)
@@ -106,30 +106,31 @@ FORMAT_VERSIONS = {
 
 
 # +
-rng = np.random.default_rng(SEED)
-# Add an explicit row id column so we can filter for random access reads later.
-row_ids = pa.array(np.arange(N_ROWS, dtype=np.int64))
+if RUN_BENCHMARKS:
+    rng = np.random.default_rng(SEED)
+    # Add an explicit row id column so we can filter for random access reads later.
+    row_ids = pa.array(np.arange(N_ROWS, dtype=np.int64))
 
-# Build the OME-Arrow column with random images.
-# OMEArrow defaults to dim_order="TCZYX", so we supply a 5D array with singleton T,C,Z.
-ome_pylist = []
-ome_arrays = []
-for _ in range(N_ROWS):
-    img = rng.integers(0, 256, size=(1, 1, 1, *OME_SHAPE), dtype=OME_DTYPE)
-    ome_arrays.append(img)
-    ome_scalar = OMEArrow(data=img).data.as_py()
-    ome_scalar.pop('masks', None)  # drop Null field to avoid Arrow null append issue
-    ome_pylist.append(ome_scalar)
-ome_column = pa.array(ome_pylist)
+    # Build the OME-Arrow column with random images.
+    # OMEArrow defaults to dim_order="TCZYX", so we supply a 5D array with singleton T,C,Z.
+    ome_pylist = []
+    ome_arrays = []
+    for _ in range(N_ROWS):
+        img = rng.integers(0, 256, size=(1, 1, 1, *OME_SHAPE), dtype=OME_DTYPE)
+        ome_arrays.append(img)
+        ome_scalar = OMEArrow(data=img).data.as_py()
+        ome_scalar.pop('masks', None)  # drop Null field to avoid Arrow null append issue
+        ome_pylist.append(ome_scalar)
+    ome_column = pa.array(ome_pylist)
 
-column_names = ['ome_image']
-columns = [row_ids, ome_column]
-column_names = ['row_id'] + column_names
-table = pa.Table.from_arrays(columns, names=column_names)
-print('table rows:', table.num_rows, 'cols:', table.num_columns)
+    column_names = ['ome_image']
+    columns = [row_ids, ome_column]
+    column_names = ['row_id'] + column_names
+    table = pa.Table.from_arrays(columns, names=column_names)
+    print('table rows:', table.num_rows, 'cols:', table.num_columns)
 
-duck_table = table
-RANDOM_INDICES = sorted(rng.choice(table.num_rows, size=RANDOM_ROW_COUNT, replace=False).tolist())
+    duck_table = table
+    RANDOM_INDICES = sorted(rng.choice(table.num_rows, size=RANDOM_ROW_COUNT, replace=False).tolist())
 def drop_path(path: Path) -> None:
     if path.is_dir():
         shutil.rmtree(path, ignore_errors=True)
@@ -200,8 +201,9 @@ def run_benchmarks(table: pa.Table, configs, repeats: int = 3):
 
 
 
-drop_path(LANCE_PATH)
-LANCE_DB = lancedb.connect(LANCE_PATH)
+if RUN_BENCHMARKS:
+    drop_path(LANCE_PATH)
+    LANCE_DB = lancedb.connect(LANCE_PATH)
 
 def reset_lance_table(db, table_name):
     try:
@@ -375,77 +377,74 @@ def ome_zarr_random_read_native(indices, base_path=OME_ZARR_DIR):
     return out
 
 
-format_configs = [
-    {
-        'name': 'Parquet (pyarrow, zstd)',
-        'path': PARQUET_PATH,
-        'write': lambda tbl, path=PARQUET_PATH: pq.write_table(tbl, path, compression='zstd'),
-        'read': lambda path=PARQUET_PATH: pq.read_table(path),
-        'random_read': parquet_random_read,
-        'random_repeats': RANDOM_READ_REPEATS,
-    },
-    {
-        'name': 'Parquet (duckdb, zstd)',
-        'path': PARQUET_DUCK_PATH,
-        'write': parquet_duck_write,
-        'read': parquet_duck_read,
-        'random_read': parquet_duck_random_read,
-        'random_repeats': RANDOM_READ_REPEATS,
-    },
-    {
-        'name': 'Lance (lancedb)',
-        'path': LANCE_PATH,
-        'write': lance_write,
-        'read': lance_read,
-        'cleanup': False,
-        'random_read': lance_random_read,
-        'random_repeats': RANDOM_READ_REPEATS,
-    },
-    {
-        'name': 'Vortex',
-        'path': VORTEX_PATH,
-        'write': vortex_write,
-        'read': vortex_read,
-        'random_read': vortex_random_read,
-        'random_repeats': RANDOM_READ_REPEATS,
-    },
-    {
-        'name': 'DuckDB (file table)',
-        'path': DUCK_PATH,
-        'write': duck_write,
-        'read': duck_read,
-        'table': duck_table,
-        'repeats': DUCK_REPEATS,
-        'random_read': duck_random_read,
-        'random_repeats': RANDOM_READ_REPEATS,
-    },
-]
+if RUN_BENCHMARKS:
+    format_configs = [
+        {
+            'name': 'Parquet (pyarrow, zstd)',
+            'path': PARQUET_PATH,
+            'write': lambda tbl, path=PARQUET_PATH: pq.write_table(tbl, path, compression='zstd'),
+            'read': lambda path=PARQUET_PATH: pq.read_table(path),
+            'random_read': parquet_random_read,
+            'random_repeats': RANDOM_READ_REPEATS,
+        },
+        {
+            'name': 'Parquet (duckdb, zstd)',
+            'path': PARQUET_DUCK_PATH,
+            'write': parquet_duck_write,
+            'read': parquet_duck_read,
+            'random_read': parquet_duck_random_read,
+            'random_repeats': RANDOM_READ_REPEATS,
+        },
+        {
+            'name': 'Lance (lancedb)',
+            'path': LANCE_PATH,
+            'write': lance_write,
+            'read': lance_read,
+            'cleanup': False,
+            'random_read': lance_random_read,
+            'random_repeats': RANDOM_READ_REPEATS,
+        },
+        {
+            'name': 'Vortex',
+            'path': VORTEX_PATH,
+            'write': vortex_write,
+            'read': vortex_read,
+            'random_read': vortex_random_read,
+            'random_repeats': RANDOM_READ_REPEATS,
+        },
+        {
+            'name': 'DuckDB (file table)',
+            'path': DUCK_PATH,
+            'write': duck_write,
+            'read': duck_read,
+            'table': duck_table,
+            'repeats': DUCK_REPEATS,
+            'random_read': duck_random_read,
+            'random_repeats': RANDOM_READ_REPEATS,
+        },
+    ]
 
-if ome_zarr_native_available():
-    format_configs.append({
-        'name': 'OME-Zarr (dir-per-image)',
-        'path': OME_ZARR_DIR,
-        'write': lambda arrays, path=OME_ZARR_DIR: ome_zarr_write_all_native(arrays, path),
-        'read': lambda path=OME_ZARR_DIR: ome_zarr_read_all_native(path),
-        'random_read': lambda path=OME_ZARR_DIR, indices=None: ome_zarr_random_read_native(indices, path),
-        'table': ome_arrays,  # run_benchmarks passes as cfg_table; here it's a list of numpy arrays
-        'random_repeats': RANDOM_READ_REPEATS,
-        'version': (
-            f"ome-zarr {VERSIONS.get('ome-zarr', '')}; "
-            f"zarr {VERSIONS.get('zarr', '')}; "
-            f"numcodecs {VERSIONS.get('numcodecs', '')}"
-        ),
-    })
-else:
-    raise RuntimeError("OME-Zarr format requires ome-zarr, zarr, and numcodecs. Install them to proceed.")
+    if ome_zarr_native_available():
+        format_configs.append({
+            'name': 'OME-Zarr (dir-per-image)',
+            'path': OME_ZARR_DIR,
+            'write': lambda arrays, path=OME_ZARR_DIR: ome_zarr_write_all_native(arrays, path),
+            'read': lambda path=OME_ZARR_DIR: ome_zarr_read_all_native(path),
+            'random_read': lambda path=OME_ZARR_DIR, indices=None: ome_zarr_random_read_native(indices, path),
+            'table': ome_arrays,  # run_benchmarks passes as cfg_table; here it's a list of numpy arrays
+            'random_repeats': RANDOM_READ_REPEATS,
+            'version': (
+                f"ome-zarr {VERSIONS.get('ome-zarr', '')}; "
+                f"zarr {VERSIONS.get('zarr', '')}; "
+                f"numcodecs {VERSIONS.get('numcodecs', '')}"
+            ),
+        })
+    else:
+        raise RuntimeError("OME-Zarr format requires ome-zarr, zarr, and numcodecs. Install them to proceed.")
 
-print('Formats:', [cfg['name'] for cfg in format_configs])
+    print('Formats:', [cfg['name'] for cfg in format_configs])
 
-if SUMMARY_CSV.exists() and RUNS_CSV.exists():
-    results_df = pd.read_csv(SUMMARY_CSV)
-    timings_df = pd.read_csv(RUNS_CSV)
-    print('Loaded existing benchmark data from', SUMMARY_CSV, 'and', RUNS_CSV)
-else:
+if RUN_BENCHMARKS:
     results = run_benchmarks(table, format_configs, repeats=REPEATS)
     results_df = pd.DataFrame({
         'format': [r['format'] for r in results],
@@ -458,7 +457,7 @@ else:
             'size_mb': [r['size_mb'] for r in results],
             'version': [r.get('version', FORMAT_VERSIONS.get(r['format'], '')) for r in results],
     })
-    results_df.to_csv(SUMMARY_CSV, index=False)
+    results_df.to_parquet(SUMMARY_PARQUET, index=False)
 
     timings = []
     for r in results:
@@ -470,7 +469,11 @@ else:
             timings.append({'format': r['format'], 'kind': 'random_read', 'run': idx, 'seconds': t})
 
     timings_df = pd.DataFrame(timings)
-    timings_df.to_csv(RUNS_CSV, index=False)
+    timings_df.to_parquet(RUNS_PARQUET, index=False)
+else:
+    results_df = pd.read_parquet(SUMMARY_PARQUET)
+    timings_df = pd.read_parquet(RUNS_PARQUET)
+    print('Loaded existing benchmark data from', SUMMARY_PARQUET, 'and', RUNS_PARQUET)
 
 print(results_df)
 print(timings_df)
@@ -501,9 +504,11 @@ def label_bars(ax, bars, fmt="%.3f"):
         if value < small_threshold:
             y = value + offset
             va = "bottom"
+            color = "black"
         else:
             y = value - offset
             va = "top"
+            color = "white"
         y = min(y, ylim_top * 0.98)
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -511,9 +516,9 @@ def label_bars(ax, bars, fmt="%.3f"):
             fmt % value,
             ha="center",
             va=va,
-            color="white",
+            color=color,
             fontsize=9,
-            clip_on=True,
+            clip_on=False,
         )
 for ax, (col, title) in zip(axes.flat, metrics):
     bars = ax.bar(x, summary[col])
