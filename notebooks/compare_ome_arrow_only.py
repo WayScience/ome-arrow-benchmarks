@@ -1,30 +1,18 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.18.1
-#   kernelspec:
-#     display_name: Python 3 (ipykernel)
-#     language: python
-#     name: python3
-# ---
+"""OME-Arrow single-column benchmarks.
 
-# # OME-Arrow single-column benchmarks
-#
-# Compare on-disk formats for a table containing only `row_id` and one OME-Arrow image column, plus a separate benchmark for a directory-per-image OME-Zarr layout.
-# Measures: write all, read all, random-read some, size on disk.
-#
-# Requires `pyarrow`, `lancedb`, `vortex-data`, `duckdb`, `ome-arrow` (installed via uv). OME-Zarr export requires optional deps (`bioio-ome-zarr`, `zarr`, `numcodecs`).
-#
-# **Setup**
-# - Run `uv run poe lab` (or `uv venv && uv sync && uv run jupyter lab`).
-# - Artifacts are written under `data/` (git-ignored).
-# - If you want the OME-Zarr timings, install the extra deps: `uv pip install bioio-ome-zarr zarr numcodecs`.
+Compare on-disk formats for a table containing only `row_id` and one OME-Arrow
+image column, plus a separate benchmark for a directory-per-image OME-Zarr
+layout. Measures: write all, read all, random-read some, size on disk.
 
-# +
+Requires `pyarrow`, `lancedb`, `vortex-data`, `duckdb`, `ome-arrow` (installed
+via uv). OME-Zarr export requires optional deps (`bioio-ome-zarr`, `zarr`,
+`numcodecs`).
+
+Setup:
+- Artifacts are written under `data/` (git-ignored).
+- If you want the OME-Zarr timings, install the extra deps:
+  `uv pip install bioio-ome-zarr zarr numcodecs`.
+"""
 import gc
 import shutil
 import time
@@ -35,6 +23,7 @@ import numcodecs
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.dataset as ds
@@ -45,12 +34,14 @@ import vortex.io as vxio
 from ome_arrow import OMEArrow
 
 pd.set_option("display.precision", 4)
-
-
-# +
+PLOT_TITLE = (__doc__ or "OME-Arrow single-column benchmarks").splitlines()[0]
 DATA_DIR = Path("data")
 shutil.rmtree(DATA_DIR, ignore_errors=True)
 DATA_DIR.mkdir(exist_ok=True)
+IMAGES_DIR = Path("images")
+IMAGES_DIR.mkdir(exist_ok=True)
+SUMMARY_CSV = DATA_DIR / "compare_ome_arrow_only_summary.csv"
+RUNS_CSV = DATA_DIR / "compare_ome_arrow_only_runs.csv"
 
 N_ROWS = 1_000
 OME_SHAPE = (100, 100)
@@ -137,13 +128,8 @@ column_names = ['row_id'] + column_names
 table = pa.Table.from_arrays(columns, names=column_names)
 print('table rows:', table.num_rows, 'cols:', table.num_columns)
 
-# -
-
 duck_table = table
 RANDOM_INDICES = sorted(rng.choice(table.num_rows, size=RANDOM_ROW_COUNT, replace=False).tolist())
-
-
-# +
 def drop_path(path: Path) -> None:
     if path.is_dir():
         shutil.rmtree(path, ignore_errors=True)
@@ -214,7 +200,6 @@ def run_benchmarks(table: pa.Table, configs, repeats: int = 3):
 
 
 
-# +
 drop_path(LANCE_PATH)
 LANCE_DB = lancedb.connect(LANCE_PATH)
 
@@ -233,7 +218,6 @@ def reset_lance_table(db, table_name):
 
 
 
-# +
 def lance_write(tbl, path=LANCE_PATH, table_name=LANCE_TABLE):
     global LANCE_DB
     LANCE_DB = reset_lance_table(LANCE_DB, table_name)
@@ -456,31 +440,92 @@ else:
     raise RuntimeError("OME-Zarr format requires ome-zarr, zarr, and numcodecs. Install them to proceed.")
 
 print('Formats:', [cfg['name'] for cfg in format_configs])
-# -
 
-results = run_benchmarks(table, format_configs, repeats=REPEATS)
-results_df = pd.DataFrame({
-    'format': [r['format'] for r in results],
-    'write_avg_s': [np.mean(r['write_seconds']) for r in results],
-    'write_std_s': [np.std(r['write_seconds']) for r in results],
-    'read_all_avg_s': [np.mean(r['read_seconds']) for r in results],
-    'read_all_std_s': [np.std(r['read_seconds']) for r in results],
-        'read_random_avg_s': [np.mean(r['random_read_seconds']) for r in results],
-        'read_random_std_s': [np.std(r['random_read_seconds']) for r in results],
-        'size_mb': [r['size_mb'] for r in results],
-        'version': [r.get('version', FORMAT_VERSIONS.get(r['format'], '')) for r in results],
-})
-results_df
+if SUMMARY_CSV.exists() and RUNS_CSV.exists():
+    results_df = pd.read_csv(SUMMARY_CSV)
+    timings_df = pd.read_csv(RUNS_CSV)
+    print('Loaded existing benchmark data from', SUMMARY_CSV, 'and', RUNS_CSV)
+else:
+    results = run_benchmarks(table, format_configs, repeats=REPEATS)
+    results_df = pd.DataFrame({
+        'format': [r['format'] for r in results],
+        'write_avg_s': [np.mean(r['write_seconds']) for r in results],
+        'write_std_s': [np.std(r['write_seconds']) for r in results],
+        'read_all_avg_s': [np.mean(r['read_seconds']) for r in results],
+        'read_all_std_s': [np.std(r['read_seconds']) for r in results],
+            'read_random_avg_s': [np.mean(r['random_read_seconds']) for r in results],
+            'read_random_std_s': [np.std(r['random_read_seconds']) for r in results],
+            'size_mb': [r['size_mb'] for r in results],
+            'version': [r.get('version', FORMAT_VERSIONS.get(r['format'], '')) for r in results],
+    })
+    results_df.to_csv(SUMMARY_CSV, index=False)
 
+    timings = []
+    for r in results:
+        for idx, t in enumerate(r['write_seconds']):
+            timings.append({'format': r['format'], 'kind': 'write', 'run': idx, 'seconds': t})
+        for idx, t in enumerate(r['read_seconds']):
+            timings.append({'format': r['format'], 'kind': 'read', 'run': idx, 'seconds': t})
+        for idx, t in enumerate(r['random_read_seconds']):
+            timings.append({'format': r['format'], 'kind': 'random_read', 'run': idx, 'seconds': t})
 
-# +
-timings = []
-for r in results:
-    for idx, t in enumerate(r['write_seconds']):
-        timings.append({'format': r['format'], 'kind': 'write', 'run': idx, 'seconds': t})
-    for idx, t in enumerate(r['read_seconds']):
-        timings.append({'format': r['format'], 'kind': 'read', 'run': idx, 'seconds': t})
-    for idx, t in enumerate(r['random_read_seconds']):
-        timings.append({'format': r['format'], 'kind': 'random_read', 'run': idx, 'seconds': t})
+    timings_df = pd.DataFrame(timings)
+    timings_df.to_csv(RUNS_CSV, index=False)
 
-pd.DataFrame(timings)
+print(results_df)
+print(timings_df)
+
+summary = results_df.copy()
+metrics = [
+    ('write_avg_s', 'Write avg (s)'),
+    ('read_all_avg_s', 'Read all avg (s)'),
+    ('read_random_avg_s', 'Read random avg (s)'),
+    ('size_mb', 'Size (MB)'),
+]
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+fig.suptitle(PLOT_TITLE)
+x = np.arange(len(summary))
+def label_bars(ax, bars, fmt="%.3f"):
+    values = [bar.get_height() for bar in bars]
+    if not values:
+        return
+    y_max = max(values)
+    if y_max <= 0:
+        return
+    ax.set_ylim(0, y_max * 1.12)
+    offset = 0.01 * y_max
+    small_threshold = 0.08 * y_max
+    ylim_top = ax.get_ylim()[1]
+    for bar, value in zip(bars, values):
+        if value < small_threshold:
+            y = value + offset
+            va = "bottom"
+        else:
+            y = value - offset
+            va = "top"
+        y = min(y, ylim_top * 0.98)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            y,
+            fmt % value,
+            ha="center",
+            va=va,
+            color="white",
+            fontsize=9,
+            clip_on=True,
+        )
+for ax, (col, title) in zip(axes.flat, metrics):
+    bars = ax.bar(x, summary[col])
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(summary['format'], rotation=30, ha='right')
+    ax.grid(axis='y', linestyle=':', alpha=0.5)
+    if col != 'size_mb':
+        ax.set_ylabel('seconds')
+    else:
+        ax.set_ylabel('MB')
+    label_bars(ax, bars)
+
+fig.savefig(IMAGES_DIR / "compare_ome_arrow_only_summary.png", dpi=150)
+plt.close(fig)
