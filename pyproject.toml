@@ -35,7 +35,7 @@ shell = "uv venv && uv sync"
 shell = "uv venv && uv sync && uv run jupyter lab"
 
 [tool.poe.tasks.run-benchmarks]
-shell = "uv run python notebooks/compare_parquet_vortex_lance.py && uv run python notebooks/compare_parquet_vortex_lance_ome.py && uv run python notebooks/compare_ome_arrow_only.py"
+shell = "uv run python src/benchmarks/compare_parquet_vortex_lance.py && uv run python src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py"
 
 [dependency-groups]
 dev = [
