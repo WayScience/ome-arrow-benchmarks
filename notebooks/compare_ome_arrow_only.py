@@ -1,4 +1,4 @@
-"""OME-Arrow single-column benchmarks.
+"""OME-Arrow single-column benchmarks
 
 Compare on-disk formats for a table containing only `row_id` and one OME-Arrow
 image column, plus a separate benchmark for a directory-per-image OME-Zarr
@@ -34,7 +34,7 @@ import vortex.io as vxio
 from ome_arrow import OMEArrow
 
 pd.set_option("display.precision", 4)
-PLOT_TITLE = (__doc__ or "OME-Arrow single-column benchmarks").splitlines()[0]
+PLOT_TITLE = f"{(__doc__ or 'OME-Arrow single-column benchmarks').splitlines()[0]} (lower is better)"
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 IMAGES_DIR = Path("images")
@@ -486,9 +486,19 @@ metrics = [
     ('size_mb', 'Size (MB)'),
 ]
 
+plt.rcParams.update({"font.size": 12})
 fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
 fig.suptitle(PLOT_TITLE)
 x = np.arange(len(summary))
+COLOR_MAP = {
+    "Parquet (pyarrow, zstd)": "#2F5C8A",
+    "Parquet (duckdb, zstd)": "#3D7FBF",
+    "Lance (lancedb)": "#C86A1B",
+    "Vortex": "#2E7D4F",
+    "DuckDB (file table)": "#B23B3B",
+    "OME-Zarr (dir-per-image)": "#7A5A3C",
+}
+colors = [COLOR_MAP.get(name, "#BAB0AC") for name in summary["format"]]
 def label_bars(ax, bars, fmt="%.3f"):
     values = [bar.get_height() for bar in bars]
     if not values:
@@ -521,7 +531,7 @@ def label_bars(ax, bars, fmt="%.3f"):
             clip_on=False,
         )
 for ax, (col, title) in zip(axes.flat, metrics):
-    bars = ax.bar(x, summary[col])
+    bars = ax.bar(x, summary[col], color=colors)
     ax.set_title(title)
     ax.set_xticks(x)
     ax.set_xticklabels(summary['format'], rotation=30, ha='right')
