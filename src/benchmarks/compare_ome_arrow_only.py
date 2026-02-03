@@ -518,8 +518,9 @@ if RUN_BENCHMARKS:
                 "path": TIFF_DIR,
                 "write": lambda arrays, path=TIFF_DIR: tiff_write_all(arrays, path),
                 "read": lambda path=TIFF_DIR: tiff_read_all(path),
-                "random_read": lambda path=TIFF_DIR,
-                indices=None: tiff_random_read(indices, path),
+                "random_read": lambda path=TIFF_DIR, indices=None: tiff_random_read(
+                    indices, path
+                ),
                 "table": ome_arrays,  # list of numpy arrays
                 "random_repeats": RANDOM_READ_REPEATS,
                 "version": f"tifffile {VERSIONS.get('tifffile', '')}",
