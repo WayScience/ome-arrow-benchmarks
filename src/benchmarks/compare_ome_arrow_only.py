@@ -10,6 +10,7 @@ via uv). OME-Zarr export requires optional deps (`bioio-ome-zarr`, `zarr`,
 
 Setup:
 - Artifacts are written under `data/` (git-ignored).
+- TIFF benchmarks require `tifffile` (included in project deps).
 - If you want the OME-Zarr timings, install the extra deps:
   `uv pip install bioio-ome-zarr zarr numcodecs`.
 """
@@ -59,6 +60,7 @@ LANCE_PATH = DATA_DIR / "ome_only_lance"
 VORTEX_PATH = DATA_DIR / "ome_only.vortex"
 DUCK_PATH = DATA_DIR / "ome_only.duckdb"
 OME_ZARR_DIR = DATA_DIR / "ome_zarr_runs"
+TIFF_DIR = DATA_DIR / "tiff_runs"
 LANCE_TABLE = "bench"
 DUCK_TABLE = "bench"
 
@@ -96,6 +98,7 @@ VERSIONS = {
     "bioio_ome_zarr": _pkg_version("bioio-ome-zarr"),
     "zarr": _pkg_version("zarr"),
     "numcodecs": _pkg_version("numcodecs"),
+    "tifffile": _pkg_version("tifffile"),
 }
 FORMAT_VERSIONS = {
     "Parquet (pyarrow, zstd)": f"pyarrow {VERSIONS['pyarrow']}",
@@ -413,6 +416,52 @@ def ome_zarr_random_read_native(indices, base_path=OME_ZARR_DIR):
     return out
 
 
+# TIFF helpers — dir-per-image layout
+def tiff_available() -> bool:
+    try:
+        import tifffile  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def tiff_write_all(arrays, base_path=TIFF_DIR):
+    if not tiff_available():
+        raise RuntimeError("tifffile is required for TIFF benchmarks.")
+    drop_path(base_path)
+    base_path.mkdir(parents=True, exist_ok=True)
+    import tifffile
+
+    for idx, arr in enumerate(arrays):
+        out_path = base_path / f"img_{idx:05d}.tiff"
+        tifffile.imwrite(str(out_path), arr)
+
+
+def tiff_read_all(base_path=TIFF_DIR):
+    if not tiff_available():
+        raise RuntimeError("tifffile is required for TIFF benchmarks.")
+    import tifffile
+
+    out = []
+    for tiff_path in sorted(base_path.glob("*.tiff")):
+        out.append(tifffile.imread(str(tiff_path)))
+    return out
+
+
+def tiff_random_read(indices, base_path=TIFF_DIR):
+    if not tiff_available():
+        raise RuntimeError("tifffile is required for TIFF benchmarks.")
+    import tifffile
+
+    paths = sorted(base_path.glob("*.tiff"))
+    out = []
+    for idx in indices:
+        if 0 <= idx < len(paths):
+            out.append(tifffile.imread(str(paths[idx])))
+    return out
+
+
 if RUN_BENCHMARKS:
     format_configs = [
         {
@@ -461,6 +510,23 @@ if RUN_BENCHMARKS:
             "random_repeats": RANDOM_READ_REPEATS,
         },
     ]
+
+    if tiff_available():
+        format_configs.append(
+            {
+                "name": "TIFF (dir-per-image)",
+                "path": TIFF_DIR,
+                "write": lambda arrays, path=TIFF_DIR: tiff_write_all(arrays, path),
+                "read": lambda path=TIFF_DIR: tiff_read_all(path),
+                "random_read": lambda path=TIFF_DIR,
+                indices=None: tiff_random_read(indices, path),
+                "table": ome_arrays,  # list of numpy arrays
+                "random_repeats": RANDOM_READ_REPEATS,
+                "version": f"tifffile {VERSIONS.get('tifffile', '')}",
+            }
+        )
+    else:
+        raise RuntimeError("TIFF format requires tifffile. Install it to proceed.")
 
     if ome_zarr_native_available():
         format_configs.append(
@@ -551,6 +617,7 @@ COLOR_MAP = {
     "Lance (lancedb)": "#C86A1B",
     "Vortex": "#2E7D4F",
     "DuckDB (file table)": "#B23B3B",
+    "TIFF (dir-per-image)": "#5A6B3A",
     "OME-Zarr (dir-per-image)": "#7A5A3C",
 }
 colors = [COLOR_MAP.get(name, "#BAB0AC") for name in summary["format"]]
