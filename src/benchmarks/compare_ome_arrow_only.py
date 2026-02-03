@@ -471,8 +471,9 @@ if RUN_BENCHMARKS:
                     arrays, path
                 ),
                 "read": lambda path=OME_ZARR_DIR: ome_zarr_read_all_native(path),
-                "random_read": lambda path=OME_ZARR_DIR,
-                indices=None: ome_zarr_random_read_native(indices, path),
+                "random_read": lambda path=OME_ZARR_DIR, indices=None: (
+                    ome_zarr_random_read_native(indices, path)
+                ),
                 "table": ome_arrays,  # run_benchmarks passes as cfg_table; here it's a list of numpy arrays
                 "random_repeats": RANDOM_READ_REPEATS,
                 "version": (
