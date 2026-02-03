@@ -40,14 +40,14 @@ dev = [
 [tool.uv]
 package = false
 
-[tool.poe.tasks.setup]
-shell = "uv venv && uv sync"
-
 [tool.poe.tasks.lab]
 shell = "uv venv && uv sync && uv run jupyter lab"
 
 [tool.poe.tasks.run-benchmarks]
 shell = "uv run python src/benchmarks/compare_parquet_vortex_lance.py && uv run python src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py"
+
+[tool.poe.tasks.setup]
+shell = "uv venv && uv sync"
 
 [tool.jupytext]
 formats = "ipynb,py:light"
