@@ -166,19 +166,54 @@ class OMEArrowDataset(Dataset):
         row = self.table.slice(idx, 1)
         ome_struct = row["ome_image"][0].as_py()
         
-        # Reconstruct numpy array from OME-Arrow data
-        # OME-Arrow stores data as nested dict with 'pixels' containing the array
-        pixels = ome_struct.get("pixels")
-        if pixels is None:
-            raise ValueError(f"No pixels found in OME-Arrow struct at index {idx}")
+        # Reconstruct numpy array from OME-Arrow chunks
+        # OME-Arrow stores data in 'chunks' field with multiple chunks possible
+        chunks = ome_struct.get("chunks", [])
+        if not chunks:
+            raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
         
-        # Convert to numpy array
-        img_array = np.array(pixels, dtype=np.float32)
+        # Reconstruct the full image from chunks
+        # For now, we assume a single chunk (which is common for small images)
+        # TODO: Handle multi-chunk images by stitching
+        chunk = chunks[0]
+        pixels = chunk["pixels"]
+        shape_x = chunk["shape_x"]
+        shape_y = chunk["shape_y"]
+        shape_z = chunk["shape_z"]
         
-        # Handle multi-dimensional arrays (TCZYX format)
-        # Squeeze singleton dimensions and get (H, W) or (C, H, W)
-        while img_array.ndim > 3:
+        # Reconstruct the array (Z, Y, X)
+        img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+        
+        # Get all chunks for all channels and time points
+        # Organize by T, C to create TCZYX structure
+        pixels_meta = ome_struct.get("pixels_meta", {})
+        size_t = pixels_meta.get("size_t", 1)
+        size_c = pixels_meta.get("size_c", 1)
+        
+        # For simplicity, if we have multiple chunks, collect them
+        if len(chunks) > 1:
+            # Build a full TCZYX array
+            all_chunks = []
+            for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
+                pixels = chunk["pixels"]
+                shape_x = chunk["shape_x"]
+                shape_y = chunk["shape_y"]
+                shape_z = chunk["shape_z"]
+                chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                all_chunks.append(chunk_array)
+            
+            # Stack into (T, C, Z, Y, X)
+            # This is a simplified approach; actual implementation may need more sophisticated stitching
+            img_array = np.stack(all_chunks, axis=0)
+            if size_t > 1 and size_c > 1:
+                img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
+        
+        # Squeeze singleton T and Z dimensions to get (C, H, W)
+        # From (T=1, C, Z=1, Y, X) to (C, Y, X)
+        while img_array.ndim > 3 and img_array.shape[0] == 1:
             img_array = img_array.squeeze(0)
+        if img_array.ndim > 3 and img_array.shape[-3] == 1:  # Squeeze Z
+            img_array = np.squeeze(img_array, axis=-3)
         
         # Ensure we have (C, H, W) format
         if img_array.ndim == 2:
@@ -770,40 +805,61 @@ def save_summary(
     track3_df: pd.DataFrame,
 ) -> None:
     """Save a JSON summary of all benchmark results."""
+    
+    # Convert grouped results to list of dicts for JSON serialization
+    track1_summary = []
+    for (fmt, pattern, transform), group in track1_df.groupby(["format", "access_pattern", "transform"]):
+        track1_summary.append({
+            "format": fmt,
+            "access_pattern": pattern,
+            "transform": transform,
+            "p50_mean": float(group["p50"].mean()),
+            "p95_mean": float(group["p95"].mean()),
+            "p99_mean": float(group["p99"].mean()),
+            "samples_per_sec_mean": float(group["samples_per_sec"].mean()),
+        })
+    
+    track2_summary = []
+    for (fmt, workers, batch), group in track2_df.groupby(["format", "num_workers", "batch_size"]):
+        track2_summary.append({
+            "format": fmt,
+            "num_workers": int(workers),
+            "batch_size": int(batch),
+            "p50_mean": float(group["p50"].mean()),
+            "samples_per_sec_mean": float(group["samples_per_sec"].mean()),
+            "first_batch_time_mean": float(group["first_batch_time"].mean()),
+        })
+    
+    track3_summary = []
+    for fmt, group in track3_df.groupby("format"):
+        track3_summary.append({
+            "format": fmt,
+            "step_time_p50_mean": float(group["step_time_p50"].mean()),
+            "data_wait_fraction_mean": float(group["data_wait_fraction"].mean()),
+            "images_per_sec_mean": float(group["images_per_sec"].mean()),
+        })
+    
     summary = {
         "metadata": {
             "versions": VERSIONS,
             "hardware": HARDWARE_INFO,
             "config": {
                 "n_rows": N_ROWS,
-                "ome_shape": OME_SHAPE,
+                "ome_shape": list(OME_SHAPE),
                 "seed": SEED,
             },
         },
         "track1": {
             "description": "Dataset __getitem__ microbenchmark",
-            "summary": track1_df.groupby(["format", "access_pattern", "transform"]).agg({
-                "p50": "mean",
-                "p95": "mean",
-                "p99": "mean",
-                "samples_per_sec": "mean",
-            }).to_dict(),
+            "results": track1_summary,
         },
         "track2": {
             "description": "DataLoader throughput",
-            "summary": track2_df.groupby(["format", "num_workers", "batch_size"]).agg({
-                "p50": "mean",
-                "samples_per_sec": "mean",
-                "first_batch_time": "mean",
-            }).to_dict(),
+            "results": track2_summary,
         },
         "track3": {
             "description": "End-to-end model loop",
-            "summary": track3_df.groupby("format").agg({
-                "step_time_p50": "mean",
-                "data_wait_fraction": "mean",
-                "images_per_sec": "mean",
-            }).to_dict(),
+            "results": track3_summary,
         },
     }
     

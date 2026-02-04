@@ -4,23 +4,58 @@
 
 Benchmarking [OME Arrow](https://github.com/WayScience/ome-arrow) through Parquet, Vortex, LanceDB, and more.
 
+## Available Benchmarks
+
+### File Format Benchmarks
+
+1. **compare_parquet_vortex_lance.py** - Wide dataset benchmark (~100k rows × 4k columns)
+2. **compare_parquet_vortex_lance_ome.py** - OME-Arrow variant with image column
+3. **compare_ome_arrow_only.py** - OME-Arrow-only + OME-Zarr + TIFF comparison
+
+### PyTorch Integration Benchmark
+
+4. **pytorch_benchmark.py** - PyTorch-focused performance testing
+   - Track 1: Dataset `__getitem__` microbenchmark
+   - Track 2: DataLoader throughput
+   - Track 3: End-to-end model training loop
+   
+   See [PyTorch Benchmark Documentation](docs/pytorch_benchmark.md) for details.
+
 ## Running benchmarks
 
-1. Create and sync a uv environment (includes parquet, lancedb, vortex-data):
+1. Create and sync a uv environment (includes parquet, lancedb, vortex-data, pytorch):
 
 ```bash
 uv venv
 uv sync
 ```
 
-2. Launch Jupyter and open `notebooks/compare_parquet_vortex_lance.ipynb`:
+2. Run individual benchmarks:
 
 ```bash
-uv run python <benchmark file>
+# File format benchmarks
+uv run python src/benchmarks/compare_parquet_vortex_lance.py
+uv run python src/benchmarks/compare_parquet_vortex_lance_ome.py
+uv run python src/benchmarks/compare_ome_arrow_only.py
+
+# PyTorch benchmark
+uv run python src/benchmarks/pytorch_benchmark.py
 ```
 
-The benchmarks defaults to ~100,000 rows x ~4,000 columns of `float64` data and ~50 columns of `string` data. Lower `N_ROWS`/`N_COLS` in the config cell if you hit memory pressure (especially before converting to pandas for the CSV benchmark).
+Or run all benchmarks at once:
 
-An OME-Arrow variant lives at `notebooks/compare_parquet_vortex_lance_ome.py` which adds a single OME image column (random 100x100) alongside the existing columns.
+```bash
+poe run-benchmarks
+```
 
-An OME-Arrow-only + OME-Zarr benchmark lives at `notebooks/compare_ome_arrow_only.pyt`, focusing on a single OME image column and a directory-per-image OME-Zarr comparison.
+## Configuration
+
+The benchmarks default to ~100,000 rows × ~4,000 columns of `float64` data and ~50 columns of `string` data. Lower `N_ROWS`/`N_COLS` in the config section if you hit memory pressure.
+
+For PyTorch benchmarks, adjust `N_ROWS` (default: 1,000 images) and other parameters in `src/benchmarks/pytorch_benchmark.py`. See the [documentation](docs/pytorch_benchmark.md) for configuration details.
+
+## Output
+
+Benchmarks generate:
+- **Data files**: Results in Parquet and JSON format (`data/` directory)
+- **Plots**: Visualizations of benchmark results (`images/` directory)
