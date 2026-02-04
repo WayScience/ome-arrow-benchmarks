@@ -794,6 +794,7 @@ dependencies = [
     { name = "pandas" },
     { name = "poethepoet" },
     { name = "pyarrow" },
+    { name = "tifffile" },
     { name = "vortex-data" },
     { name = "zarr" },
 ]
@@ -817,6 +818,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2" },
     { name = "poethepoet", specifier = ">=0.38" },
     { name = "pyarrow", specifier = ">=15" },
+    { name = "tifffile", specifier = ">=2024.7.24" },
     { name = "vortex-data", specifier = ">=0.56" },
     { name = "zarr", specifier = ">=3.1.5" },
 ]
