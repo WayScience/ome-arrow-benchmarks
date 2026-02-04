@@ -213,7 +213,7 @@ OME_SHAPE = (256, 256)  # Larger images
 2. **Tune num_workers**: Start with 2-4 workers; more isn't always better
 3. **Profile data loading**: If data wait fraction > 50%, optimize data pipeline
 4. **Use SSD storage**: Disk I/O can be a bottleneck with slow storage
-5. **Monitor CPU usage**: Ensure workers aren't utilizing multiple cores
+5. **Monitor CPU usage**: Ensure workers are efficiently utilizing available cores
 
 ## Troubleshooting
 

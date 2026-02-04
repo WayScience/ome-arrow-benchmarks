@@ -173,8 +173,8 @@ class OMEArrowDataset(Dataset):
             raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
         
         # Reconstruct the full image from chunks
-        # For now, we assume a single chunk (which is common for small images)
-        # TODO: Handle multi-chunk images by stitching
+        # Currently only single-chunk images are supported
+        # Multi-chunk stitching would require additional logic based on chunk coordinates
         chunk = chunks[0]
         pixels = chunk["pixels"]
         shape_x = chunk["shape_x"]
