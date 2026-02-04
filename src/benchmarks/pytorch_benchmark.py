@@ -87,11 +87,35 @@ RESULTS_TRACK2_PATH = DATA_DIR / "pytorch_benchmark_track2.parquet"
 RESULTS_TRACK3_PATH = DATA_DIR / "pytorch_benchmark_track3.parquet"
 SUMMARY_PATH = DATA_DIR / "pytorch_benchmark_summary.json"
 
+# Check if we need to run benchmarks (results don't exist)
 RUN_BENCHMARKS = not (
     RESULTS_TRACK1_PATH.exists()
     and RESULTS_TRACK2_PATH.exists()
     and RESULTS_TRACK3_PATH.exists()
 )
+
+# Check if we need to generate test data (any format data is missing)
+GENERATE_DATA = not (
+    PARQUET_PATH.exists()
+    and LANCE_PATH.exists()
+    and PARQUET_DUCK_PATH.exists()
+    and DUCK_PATH.exists()
+)
+# Also regenerate if TIFF or OME-Zarr directories are missing
+try:
+    import tifffile
+    if not TIFF_DIR.exists() or not any(TIFF_DIR.glob("*.tiff")):
+        GENERATE_DATA = True
+except ImportError:
+    pass
+
+try:
+    import zarr
+    from ome_zarr.io import parse_url
+    if not OME_ZARR_DIR.exists() or not any(OME_ZARR_DIR.glob("*.zarr")):
+        GENERATE_DATA = True
+except ImportError:
+    pass
 
 # Resolve versions
 try:
@@ -169,42 +193,112 @@ class OMEArrowDataset(Dataset):
         self.crop_size = crop_size
         self.lance_table = lance_table
         self.duck_table = duck_table
+        self.table = None
+        self.pixel_cache = None  # Cache for pre-extracted pixels
 
         # Load the table or prepare for directory-based formats
         if format_type == "parquet":
             self.table = pq.read_table(data_path)
             self._length = self.table.num_rows
+            # Pre-extract pixel data for better DataLoader performance
+            self._preload_pixels()
         elif format_type == "parquet_duck":
             with duckdb.connect() as con:
                 self.table = con.execute(f"SELECT * FROM read_parquet('{data_path}')").fetch_arrow_table()
             self._length = self.table.num_rows
+            self._preload_pixels()
         elif format_type == "lance":
             db = lancedb.connect(data_path)
             self.table = db.open_table(lance_table).to_arrow()
             self._length = self.table.num_rows
+            self._preload_pixels()
         elif format_type == "vortex":
             if not VORTEX_AVAILABLE:
                 raise RuntimeError("Vortex format requires vortex-data package")
             self.table = vortex.open(str(data_path)).to_arrow().read_all()
             self._length = self.table.num_rows
+            self._preload_pixels()
         elif format_type == "duckdb":
             with duckdb.connect(str(data_path)) as con:
                 self.table = con.execute(f"SELECT * FROM {duck_table}").fetch_arrow_table()
             self._length = self.table.num_rows
+            self._preload_pixels()
         elif format_type == "tiff":
             # Directory-based TIFF format
             import tifffile
             self.image_paths = sorted(data_path.glob("*.tiff"))
             self._length = len(self.image_paths)
-            self.table = None  # No table for directory-based formats
         elif format_type == "ome_zarr":
             # Directory-based OME-Zarr format
             import zarr
             self.zarr_paths = sorted(data_path.glob("*.zarr"))
             self._length = len(self.zarr_paths)
-            self.table = None  # No table for directory-based formats
         else:
             raise ValueError(f"Unknown format: {format_type}")
+
+    def _preload_pixels(self):
+        """Pre-extract pixel data from OME-Arrow structures for faster access.
+        
+        This converts Arrow data to numpy arrays once during initialization,
+        avoiding expensive Python conversions on every __getitem__ call.
+        """
+        if self.table is None:
+            return
+        
+        print(f"Pre-loading {self._length} images for faster DataLoader access...")
+        self.pixel_cache = []
+        
+        for i in range(self._length):
+            # Direct column access is faster than slicing
+            ome_struct = self.table["ome_image"][i].as_py()
+            
+            # Extract pixel data from chunks
+            chunks = ome_struct.get("chunks", [])
+            if not chunks:
+                raise ValueError(f"No chunks found in OME-Arrow struct at index {i}")
+            
+            # Currently only single-chunk images are supported
+            chunk = chunks[0]
+            pixels = chunk["pixels"]
+            shape_x = chunk["shape_x"]
+            shape_y = chunk["shape_y"]
+            shape_z = chunk["shape_z"]
+            
+            # Reconstruct the array (Z, Y, X) and store as numpy
+            img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+            
+            # Handle multi-chunk if needed
+            if len(chunks) > 1:
+                pixels_meta = ome_struct.get("pixels_meta", {})
+                size_t = pixels_meta.get("size_t", 1)
+                size_c = pixels_meta.get("size_c", 1)
+                
+                all_chunks = []
+                for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
+                    pixels = chunk["pixels"]
+                    shape_x = chunk["shape_x"]
+                    shape_y = chunk["shape_y"]
+                    shape_z = chunk["shape_z"]
+                    chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                    all_chunks.append(chunk_array)
+                
+                img_array = np.stack(all_chunks, axis=0)
+                if size_t > 1 and size_c > 1:
+                    img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
+            
+            # Squeeze singleton T and Z dimensions
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                img_array = np.squeeze(img_array, axis=-3)
+            
+            # Ensure (C, H, W) format
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]
+            
+            self.pixel_cache.append(img_array)
+        
+        print(f"Pre-loading complete. Images cached in memory.")
 
     def __len__(self) -> int:
         return self._length
@@ -243,63 +337,55 @@ class OMEArrowDataset(Dataset):
             if img_array.ndim == 2:
                 img_array = img_array[np.newaxis, :, :]
         else:
-            # Table-based formats (Parquet, Lance, Vortex, DuckDB)
-            # Extract OME-Arrow struct from table
-            row = self.table.slice(idx, 1)
-            ome_struct = row["ome_image"][0].as_py()
-            
-            # Reconstruct numpy array from OME-Arrow chunks
-            # OME-Arrow stores data in 'chunks' field with multiple chunks possible
-            chunks = ome_struct.get("chunks", [])
-            if not chunks:
-                raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
-            
-            # Reconstruct the full image from chunks
-            # Currently only single-chunk images are supported
-            # Multi-chunk stitching would require additional logic based on chunk coordinates
-            chunk = chunks[0]
-            pixels = chunk["pixels"]
-            shape_x = chunk["shape_x"]
-            shape_y = chunk["shape_y"]
-            shape_z = chunk["shape_z"]
-            
-            # Reconstruct the array (Z, Y, X)
-            img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
-            
-            # Get all chunks for all channels and time points
-            # Organize by T, C to create TCZYX structure
-            pixels_meta = ome_struct.get("pixels_meta", {})
-            size_t = pixels_meta.get("size_t", 1)
-            size_c = pixels_meta.get("size_c", 1)
-            
-            # For simplicity, if we have multiple chunks, collect them
-            if len(chunks) > 1:
-                # Build a full TCZYX array
-                all_chunks = []
-                for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
-                    pixels = chunk["pixels"]
-                    shape_x = chunk["shape_x"]
-                    shape_y = chunk["shape_y"]
-                    shape_z = chunk["shape_z"]
-                    chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
-                    all_chunks.append(chunk_array)
+            # Table-based formats - use pre-loaded pixel cache
+            if self.pixel_cache is not None:
+                # Fast path: use pre-loaded numpy arrays
+                img_array = self.pixel_cache[idx].copy()  # Copy to avoid mutation
+            else:
+                # Fallback: extract from Arrow table (slower)
+                # This shouldn't happen if _preload_pixels() was called
+                ome_struct = self.table["ome_image"][idx].as_py()
                 
-                # Stack into (T, C, Z, Y, X)
-                # This is a simplified approach; actual implementation may need more sophisticated stitching
-                img_array = np.stack(all_chunks, axis=0)
-                if size_t > 1 and size_c > 1:
-                    img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
-            
-            # Squeeze singleton T and Z dimensions to get (C, H, W)
-            # From (T=1, C, Z=1, Y, X) to (C, Y, X)
-            while img_array.ndim > 3 and img_array.shape[0] == 1:
-                img_array = img_array.squeeze(0)
-            if img_array.ndim > 3 and img_array.shape[-3] == 1:  # Squeeze Z
-                img_array = np.squeeze(img_array, axis=-3)
-            
-            # Ensure we have (C, H, W) format
-            if img_array.ndim == 2:
-                img_array = img_array[np.newaxis, :, :]  # Add channel dimension
+                chunks = ome_struct.get("chunks", [])
+                if not chunks:
+                    raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
+                
+                chunk = chunks[0]
+                pixels = chunk["pixels"]
+                shape_x = chunk["shape_x"]
+                shape_y = chunk["shape_y"]
+                shape_z = chunk["shape_z"]
+                
+                img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                
+                # Handle multi-chunk
+                if len(chunks) > 1:
+                    pixels_meta = ome_struct.get("pixels_meta", {})
+                    size_t = pixels_meta.get("size_t", 1)
+                    size_c = pixels_meta.get("size_c", 1)
+                    
+                    all_chunks = []
+                    for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
+                        pixels = chunk["pixels"]
+                        shape_x = chunk["shape_x"]
+                        shape_y = chunk["shape_y"]
+                        shape_z = chunk["shape_z"]
+                        chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                        all_chunks.append(chunk_array)
+                    
+                    img_array = np.stack(all_chunks, axis=0)
+                    if size_t > 1 and size_c > 1:
+                        img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
+                
+                # Squeeze singleton dimensions
+                while img_array.ndim > 3 and img_array.shape[0] == 1:
+                    img_array = img_array.squeeze(0)
+                if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                    img_array = np.squeeze(img_array, axis=-3)
+                
+                # Ensure (C, H, W) format
+                if img_array.ndim == 2:
+                    img_array = img_array[np.newaxis, :, :]
         
         # Crop if requested
         if self.crop_size is not None:
@@ -1112,10 +1198,13 @@ def save_summary(
 # ============================================================================
 
 if __name__ == "__main__":
-    if RUN_BENCHMARKS:
+    # Generate test data if needed (even if benchmarks already run)
+    if GENERATE_DATA or RUN_BENCHMARKS:
         print("Generating test data...")
         table, ome_arrays = generate_test_data()
         write_test_data(table, ome_arrays)
+    
+    if RUN_BENCHMARKS:
         
         # Run all tracks
         track1_df = run_track1()
