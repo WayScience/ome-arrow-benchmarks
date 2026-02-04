@@ -25,6 +25,9 @@ import matplotlib.pyplot as plt
 import pyarrow as pa
 import pyarrow.parquet as pq
 import lancedb
+import duckdb
+import vortex
+import vortex.io as vxio
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -64,6 +67,14 @@ TRACK3_BATCH_SIZE = 16
 # Paths
 LANCE_PATH = DATA_DIR / "pytorch_bench_lance"
 PARQUET_PATH = DATA_DIR / "pytorch_bench.parquet"
+PARQUET_DUCK_PATH = DATA_DIR / "pytorch_bench_duck.parquet"
+VORTEX_PATH = DATA_DIR / "pytorch_bench.vortex"
+DUCK_PATH = DATA_DIR / "pytorch_bench.duckdb"
+TIFF_DIR = DATA_DIR / "pytorch_bench_tiff"
+OME_ZARR_DIR = DATA_DIR / "pytorch_bench_ome_zarr"
+LANCE_TABLE = "bench"
+DUCK_TABLE = "bench"
+
 RESULTS_TRACK1_PATH = DATA_DIR / "pytorch_benchmark_track1.parquet"
 RESULTS_TRACK2_PATH = DATA_DIR / "pytorch_benchmark_track2.parquet"
 RESULTS_TRACK3_PATH = DATA_DIR / "pytorch_benchmark_track3.parquet"
@@ -94,7 +105,11 @@ VERSIONS = {
     "numpy": np.__version__,
     "pyarrow": pa.__version__,
     "lancedb": getattr(lancedb, "__version__", "unknown"),
+    "duckdb": duckdb.__version__,
+    "vortex": getattr(vortex, "__version__", _pkg_version("vortex-data", "unknown")),
     "ome-arrow": getattr(__import__("ome_arrow"), "__version__", "unknown"),
+    "tifffile": _pkg_version("tifffile"),
+    "ome-zarr": _pkg_version("ome-zarr"),
 }
 
 HARDWARE_INFO = {
@@ -118,14 +133,16 @@ def drop_path(path: Path) -> None:
 
 
 class OMEArrowDataset(Dataset):
-    """PyTorch Dataset for OME-Arrow images stored in Parquet/Lance.
+    """PyTorch Dataset for OME-Arrow images stored in various formats.
     
     Args:
-        data_path: Path to Parquet file or Lance database
-        format_type: "parquet" or "lance"
+        data_path: Path to data file/directory
+        format_type: "parquet", "parquet_duck", "lance", "vortex", "duckdb", "tiff", or "ome_zarr"
         transform: Optional torchvision transform
         access_pattern: "random" or "sequential" or "grouped"
         crop_size: Optional crop size (H, W)
+        lance_table: Table name for Lance format (default: "bench")
+        duck_table: Table name for DuckDB format (default: "bench")
     """
 
     def __init__(
@@ -135,23 +152,50 @@ class OMEArrowDataset(Dataset):
         transform: Optional[Any] = None,
         access_pattern: str = "sequential",
         crop_size: Optional[Tuple[int, int]] = None,
+        lance_table: str = "bench",
+        duck_table: str = "bench",
     ):
         self.data_path = data_path
         self.format_type = format_type
         self.transform = transform
         self.access_pattern = access_pattern
         self.crop_size = crop_size
+        self.lance_table = lance_table
+        self.duck_table = duck_table
 
-        # Load the table
+        # Load the table or prepare for directory-based formats
         if format_type == "parquet":
             self.table = pq.read_table(data_path)
+            self._length = self.table.num_rows
+        elif format_type == "parquet_duck":
+            with duckdb.connect() as con:
+                self.table = con.execute(f"SELECT * FROM read_parquet('{data_path}')").fetch_arrow_table()
+            self._length = self.table.num_rows
         elif format_type == "lance":
             db = lancedb.connect(data_path)
-            self.table = db.open_table("bench").to_arrow()
+            self.table = db.open_table(lance_table).to_arrow()
+            self._length = self.table.num_rows
+        elif format_type == "vortex":
+            self.table = vortex.open(str(data_path)).to_arrow().read_all()
+            self._length = self.table.num_rows
+        elif format_type == "duckdb":
+            with duckdb.connect(str(data_path)) as con:
+                self.table = con.execute(f"SELECT * FROM {duck_table}").fetch_arrow_table()
+            self._length = self.table.num_rows
+        elif format_type == "tiff":
+            # Directory-based TIFF format
+            import tifffile
+            self.image_paths = sorted(data_path.glob("*.tiff"))
+            self._length = len(self.image_paths)
+            self.table = None  # No table for directory-based formats
+        elif format_type == "ome_zarr":
+            # Directory-based OME-Zarr format
+            import zarr
+            self.zarr_paths = sorted(data_path.glob("*.zarr"))
+            self._length = len(self.zarr_paths)
+            self.table = None  # No table for directory-based formats
         else:
             raise ValueError(f"Unknown format: {format_type}")
-
-        self._length = self.table.num_rows
 
     def __len__(self) -> int:
         return self._length
@@ -162,62 +206,91 @@ class OMEArrowDataset(Dataset):
         Returns:
             torch.Tensor: Image tensor of shape (C, H, W) as float32
         """
-        # Extract OME-Arrow struct from table
-        row = self.table.slice(idx, 1)
-        ome_struct = row["ome_image"][0].as_py()
-        
-        # Reconstruct numpy array from OME-Arrow chunks
-        # OME-Arrow stores data in 'chunks' field with multiple chunks possible
-        chunks = ome_struct.get("chunks", [])
-        if not chunks:
-            raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
-        
-        # Reconstruct the full image from chunks
-        # Currently only single-chunk images are supported
-        # Multi-chunk stitching would require additional logic based on chunk coordinates
-        chunk = chunks[0]
-        pixels = chunk["pixels"]
-        shape_x = chunk["shape_x"]
-        shape_y = chunk["shape_y"]
-        shape_z = chunk["shape_z"]
-        
-        # Reconstruct the array (Z, Y, X)
-        img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
-        
-        # Get all chunks for all channels and time points
-        # Organize by T, C to create TCZYX structure
-        pixels_meta = ome_struct.get("pixels_meta", {})
-        size_t = pixels_meta.get("size_t", 1)
-        size_c = pixels_meta.get("size_c", 1)
-        
-        # For simplicity, if we have multiple chunks, collect them
-        if len(chunks) > 1:
-            # Build a full TCZYX array
-            all_chunks = []
-            for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
-                pixels = chunk["pixels"]
-                shape_x = chunk["shape_x"]
-                shape_y = chunk["shape_y"]
-                shape_z = chunk["shape_z"]
-                chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
-                all_chunks.append(chunk_array)
+        # Handle directory-based formats (TIFF, OME-Zarr)
+        if self.format_type == "tiff":
+            import tifffile
+            img_array = tifffile.imread(str(self.image_paths[idx]))
+            # TIFF typically stores as (Z, Y, X) or (T, C, Z, Y, X)
+            # Squeeze singleton dimensions
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                img_array = np.squeeze(img_array, axis=-3)
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]
+        elif self.format_type == "ome_zarr":
+            import zarr
+            zarr_dir = self.zarr_paths[idx]
+            grp = zarr.open_group(str(zarr_dir), mode="r")
+            if "0" in grp:
+                img_array = grp["0"][...]
+            else:
+                raise ValueError(f"No '0' group found in OME-Zarr at {zarr_dir}")
+            # Squeeze singleton dimensions
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                img_array = np.squeeze(img_array, axis=-3)
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]
+        else:
+            # Table-based formats (Parquet, Lance, Vortex, DuckDB)
+            # Extract OME-Arrow struct from table
+            row = self.table.slice(idx, 1)
+            ome_struct = row["ome_image"][0].as_py()
             
-            # Stack into (T, C, Z, Y, X)
-            # This is a simplified approach; actual implementation may need more sophisticated stitching
-            img_array = np.stack(all_chunks, axis=0)
-            if size_t > 1 and size_c > 1:
-                img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
-        
-        # Squeeze singleton T and Z dimensions to get (C, H, W)
-        # From (T=1, C, Z=1, Y, X) to (C, Y, X)
-        while img_array.ndim > 3 and img_array.shape[0] == 1:
-            img_array = img_array.squeeze(0)
-        if img_array.ndim > 3 and img_array.shape[-3] == 1:  # Squeeze Z
-            img_array = np.squeeze(img_array, axis=-3)
-        
-        # Ensure we have (C, H, W) format
-        if img_array.ndim == 2:
-            img_array = img_array[np.newaxis, :, :]  # Add channel dimension
+            # Reconstruct numpy array from OME-Arrow chunks
+            # OME-Arrow stores data in 'chunks' field with multiple chunks possible
+            chunks = ome_struct.get("chunks", [])
+            if not chunks:
+                raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
+            
+            # Reconstruct the full image from chunks
+            # Currently only single-chunk images are supported
+            # Multi-chunk stitching would require additional logic based on chunk coordinates
+            chunk = chunks[0]
+            pixels = chunk["pixels"]
+            shape_x = chunk["shape_x"]
+            shape_y = chunk["shape_y"]
+            shape_z = chunk["shape_z"]
+            
+            # Reconstruct the array (Z, Y, X)
+            img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+            
+            # Get all chunks for all channels and time points
+            # Organize by T, C to create TCZYX structure
+            pixels_meta = ome_struct.get("pixels_meta", {})
+            size_t = pixels_meta.get("size_t", 1)
+            size_c = pixels_meta.get("size_c", 1)
+            
+            # For simplicity, if we have multiple chunks, collect them
+            if len(chunks) > 1:
+                # Build a full TCZYX array
+                all_chunks = []
+                for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
+                    pixels = chunk["pixels"]
+                    shape_x = chunk["shape_x"]
+                    shape_y = chunk["shape_y"]
+                    shape_z = chunk["shape_z"]
+                    chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                    all_chunks.append(chunk_array)
+                
+                # Stack into (T, C, Z, Y, X)
+                # This is a simplified approach; actual implementation may need more sophisticated stitching
+                img_array = np.stack(all_chunks, axis=0)
+                if size_t > 1 and size_c > 1:
+                    img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
+            
+            # Squeeze singleton T and Z dimensions to get (C, H, W)
+            # From (T=1, C, Z=1, Y, X) to (C, Y, X)
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:  # Squeeze Z
+                img_array = np.squeeze(img_array, axis=-3)
+            
+            # Ensure we have (C, H, W) format
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]  # Add channel dimension
         
         # Crop if requested
         if self.crop_size is not None:
@@ -261,36 +334,94 @@ class SimpleEmbeddingModel(nn.Module):
         return x
 
 
-def generate_test_data() -> pa.Table:
-    """Generate synthetic OME-Arrow dataset for benchmarking."""
+def generate_test_data() -> Tuple[pa.Table, List[np.ndarray]]:
+    """Generate synthetic OME-Arrow dataset for benchmarking.
+    
+    Returns:
+        Tuple of (Arrow table, list of numpy arrays for directory-based formats)
+    """
     rng = np.random.default_rng(SEED)
     row_ids = pa.array(np.arange(N_ROWS, dtype=np.int64))
 
     # Build OME-Arrow column with random images
     ome_pylist = []
+    ome_arrays = []
     for _ in range(N_ROWS):
         img = rng.integers(0, 256, size=(1, 1, 1, *OME_SHAPE), dtype=OME_DTYPE)
+        ome_arrays.append(img)
         ome_scalar = OMEArrow(data=img).data.as_py()
         ome_scalar.pop("masks", None)  # drop Null field
         ome_pylist.append(ome_scalar)
     
     ome_column = pa.array(ome_pylist)
     table = pa.Table.from_arrays([row_ids, ome_column], names=["row_id", "ome_image"])
-    return table
+    return table, ome_arrays
 
 
-def write_test_data(table: pa.Table) -> None:
-    """Write test data to both Parquet and Lance formats."""
-    # Write Parquet
+def write_test_data(table: pa.Table, ome_arrays: List[np.ndarray]) -> None:
+    """Write test data to all supported formats."""
+    # Write Parquet (pyarrow)
     drop_path(PARQUET_PATH)
     pq.write_table(table, PARQUET_PATH, compression="zstd")
     print(f"Wrote Parquet to {PARQUET_PATH}")
 
+    # Write Parquet (duckdb)
+    drop_path(PARQUET_DUCK_PATH)
+    con = duckdb.connect()
+    con.register("tmp_tbl", table)
+    con.execute(
+        f"COPY (SELECT * FROM tmp_tbl) TO '{PARQUET_DUCK_PATH}' WITH (FORMAT 'PARQUET', COMPRESSION 'ZSTD')"
+    )
+    con.close()
+    print(f"Wrote Parquet (DuckDB) to {PARQUET_DUCK_PATH}")
+
     # Write Lance
     drop_path(LANCE_PATH)
     db = lancedb.connect(LANCE_PATH)
-    db.create_table("bench", table, mode="overwrite")
+    db.create_table(LANCE_TABLE, table, mode="overwrite")
     print(f"Wrote Lance to {LANCE_PATH}")
+
+    # Write Vortex
+    drop_path(VORTEX_PATH)
+    vxio.write(table, str(VORTEX_PATH))
+    print(f"Wrote Vortex to {VORTEX_PATH}")
+
+    # Write DuckDB
+    drop_path(DUCK_PATH)
+    con = duckdb.connect(str(DUCK_PATH))
+    con.register("tmp_tbl", table)
+    con.execute(f"CREATE TABLE {DUCK_TABLE} AS SELECT * FROM tmp_tbl")
+    con.close()
+    print(f"Wrote DuckDB to {DUCK_PATH}")
+
+    # Write TIFF (directory-based)
+    try:
+        import tifffile
+        drop_path(TIFF_DIR)
+        TIFF_DIR.mkdir(parents=True, exist_ok=True)
+        for idx, arr in enumerate(ome_arrays):
+            out_path = TIFF_DIR / f"img_{idx:05d}.tiff"
+            tifffile.imwrite(str(out_path), arr)
+        print(f"Wrote TIFF to {TIFF_DIR}")
+    except ImportError:
+        print("Warning: tifffile not available, skipping TIFF format")
+
+    # Write OME-Zarr (directory-based)
+    try:
+        from ome_zarr.io import parse_url
+        from ome_zarr.writer import write_image
+        import zarr
+        
+        drop_path(OME_ZARR_DIR)
+        OME_ZARR_DIR.mkdir(parents=True, exist_ok=True)
+        for idx, arr in enumerate(ome_arrays):
+            out_dir = OME_ZARR_DIR / f"img_{idx:05d}.zarr"
+            store = parse_url(str(out_dir), mode="w").store
+            root = zarr.group(store=store)
+            write_image(arr, root, axes="tczyx")
+        print(f"Wrote OME-Zarr to {OME_ZARR_DIR}")
+    except ImportError:
+        print("Warning: ome-zarr not available, skipping OME-Zarr format")
 
 
 def percentile_stats(values: List[float]) -> Dict[str, float]:
@@ -305,6 +436,40 @@ def percentile_stats(values: List[float]) -> Dict[str, float]:
         "min": float(np.min(arr)),
         "max": float(np.max(arr)),
     }
+
+
+def get_available_formats() -> List[Dict[str, Any]]:
+    """Get list of available formats with their configurations.
+    
+    Returns:
+        List of format configurations
+    """
+    formats = [
+        {"name": "Parquet", "type": "parquet", "path": PARQUET_PATH},
+        {"name": "Parquet (DuckDB)", "type": "parquet_duck", "path": PARQUET_DUCK_PATH},
+        {"name": "Lance", "type": "lance", "path": LANCE_PATH},
+        {"name": "Vortex", "type": "vortex", "path": VORTEX_PATH},
+        {"name": "DuckDB", "type": "duckdb", "path": DUCK_PATH},
+    ]
+    
+    # Add TIFF if available
+    try:
+        import tifffile
+        if TIFF_DIR.exists():
+            formats.append({"name": "TIFF", "type": "tiff", "path": TIFF_DIR})
+    except ImportError:
+        pass
+    
+    # Add OME-Zarr if available
+    try:
+        import zarr
+        from ome_zarr.io import parse_url
+        if OME_ZARR_DIR.exists():
+            formats.append({"name": "OME-Zarr", "type": "ome_zarr", "path": OME_ZARR_DIR})
+    except ImportError:
+        pass
+    
+    return formats
 
 
 # ============================================================================
@@ -361,31 +526,27 @@ def run_track1() -> pd.DataFrame:
     print("=" * 80)
     
     results = []
+    formats = get_available_formats()
     
-    for format_type in ["parquet", "lance"]:
-        data_path = PARQUET_PATH if format_type == "parquet" else LANCE_PATH
-        
+    for fmt in formats:
         for access_pattern in ["sequential", "random"]:
-            for transform_type in ["none", "normalize", "augment"]:
+            for transform_type in ["none", "normalize"]:  # Reduced transforms
                 # Define transforms
                 if transform_type == "none":
                     transform = None
                 elif transform_type == "normalize":
                     transform = transforms.Normalize(mean=[0.5], std=[0.5])
-                else:  # augment
-                    transform = transforms.Compose([
-                        transforms.RandomHorizontalFlip(p=0.5),
-                        transforms.Normalize(mean=[0.5], std=[0.5]),
-                    ])
                 
                 dataset = OMEArrowDataset(
-                    data_path=data_path,
-                    format_type=format_type,
+                    data_path=fmt["path"],
+                    format_type=fmt["type"],
                     transform=transform,
                     access_pattern=access_pattern,
+                    lance_table=LANCE_TABLE,
+                    duck_table=DUCK_TABLE,
                 )
                 
-                print(f"\n[Track 1] format={format_type}, pattern={access_pattern}, transform={transform_type}")
+                print(f"\n[Track 1] format={fmt['name']}, pattern={access_pattern}, transform={transform_type}")
                 
                 for run_idx in range(TRACK1_REPEATS):
                     gc.collect()
@@ -397,7 +558,7 @@ def run_track1() -> pd.DataFrame:
                     )
                     
                     result = {
-                        "format": format_type,
+                        "format": fmt["name"],
                         "access_pattern": access_pattern,
                         "transform": transform_type,
                         "run": run_idx,
@@ -484,19 +645,23 @@ def run_track2() -> pd.DataFrame:
     print("=" * 80)
     
     results = []
+    formats = get_available_formats()
     
-    for format_type in ["parquet", "lance"]:
-        data_path = PARQUET_PATH if format_type == "parquet" else LANCE_PATH
-        
+    # Use only a subset of formats for Track 2 (table-based only) to reduce runtime
+    table_formats = [fmt for fmt in formats if fmt["type"] not in ["tiff", "ome_zarr"]]
+    
+    for fmt in table_formats:
         for batch_size in TRACK2_BATCH_SIZES:
             for num_workers in TRACK2_NUM_WORKERS_OPTIONS:
                 dataset = OMEArrowDataset(
-                    data_path=data_path,
-                    format_type=format_type,
+                    data_path=fmt["path"],
+                    format_type=fmt["type"],
                     transform=None,
+                    lance_table=LANCE_TABLE,
+                    duck_table=DUCK_TABLE,
                 )
                 
-                print(f"\n[Track 2] format={format_type}, batch_size={batch_size}, num_workers={num_workers}")
+                print(f"\n[Track 2] format={fmt['name']}, batch_size={batch_size}, num_workers={num_workers}")
                 
                 for run_idx in range(TRACK2_REPEATS):
                     gc.collect()
@@ -511,7 +676,7 @@ def run_track2() -> pd.DataFrame:
                     )
                     
                     result = {
-                        "format": format_type,
+                        "format": fmt["name"],
                         "batch_size": batch_size,
                         "num_workers": num_workers,
                         "run": run_idx,
@@ -610,16 +775,20 @@ def run_track3() -> pd.DataFrame:
     model = SimpleEmbeddingModel(input_channels=1, embedding_dim=128)
     model.eval()
     
-    for format_type in ["parquet", "lance"]:
-        data_path = PARQUET_PATH if format_type == "parquet" else LANCE_PATH
-        
+    formats = get_available_formats()
+    # Use only table-based formats for Track 3 to reduce runtime
+    table_formats = [fmt for fmt in formats if fmt["type"] not in ["tiff", "ome_zarr"]]
+    
+    for fmt in table_formats:
         dataset = OMEArrowDataset(
-            data_path=data_path,
-            format_type=format_type,
+            data_path=fmt["path"],
+            format_type=fmt["type"],
             transform=transforms.Normalize(mean=[0.5], std=[0.5]),
+            lance_table=LANCE_TABLE,
+            duck_table=DUCK_TABLE,
         )
         
-        print(f"\n[Track 3] format={format_type}, batch_size={TRACK3_BATCH_SIZE}")
+        print(f"\n[Track 3] format={fmt['name']}, batch_size={TRACK3_BATCH_SIZE}")
         
         for run_idx in range(TRACK3_REPEATS):
             gc.collect()
@@ -633,7 +802,7 @@ def run_track3() -> pd.DataFrame:
             )
             
             result = {
-                "format": format_type,
+                "format": fmt["name"],
                 "batch_size": TRACK3_BATCH_SIZE,
                 "run": run_idx,
                 **stats,
@@ -654,46 +823,59 @@ def run_track3() -> pd.DataFrame:
 
 def plot_track1_results(df: pd.DataFrame) -> None:
     """Plot Track 1 results: Dataset __getitem__ latency."""
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
-    fig.suptitle("Track 1: Dataset __getitem__ Latency (lower is better)")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
+    fig.suptitle("Track 1: Dataset __getitem__ Latency", fontsize=14)
+    
+    # Color map for all formats
+    color_map = {
+        "Parquet": "#2F5C8A",
+        "Parquet (DuckDB)": "#3D7FBF",
+        "Lance": "#C86A1B",
+        "Vortex": "#2E7D4F",
+        "DuckDB": "#B23B3B",
+        "TIFF": "#5A6B3A",
+        "OME-Zarr": "#7A5A3C",
+    }
     
     # Plot 1: p95 latency by format and access pattern
     ax = axes[0]
-    summary = df.groupby(["format", "access_pattern", "transform"])["p95"].mean().reset_index()
+    summary = df.groupby(["format", "access_pattern"])["p95"].mean().reset_index()
     
     x_labels = []
     x_pos = []
     colors = []
     values = []
     
-    color_map = {"parquet": "#2F5C8A", "lance": "#C86A1B"}
+    # Create abbreviated labels
+    pattern_abbrev = {"sequential": "seq", "random": "rnd"}
     
     pos = 0
     for _, row in summary.iterrows():
-        label = f"{row['format']}\n{row['access_pattern']}\n{row['transform']}"
+        # Shorten label: format name + pattern abbreviation
+        label = f"{row['format'][:8]}\n{pattern_abbrev.get(row['access_pattern'], row['access_pattern'])}"
         x_labels.append(label)
         x_pos.append(pos)
         colors.append(color_map.get(row['format'], "#BAB0AC"))
         values.append(row['p95'] * 1000)  # Convert to ms
         pos += 1
     
-    bars = ax.bar(x_pos, values, color=colors)
-    ax.set_ylabel("p95 Latency (ms)")
-    ax.set_title("p95 __getitem__ Latency")
+    bars = ax.bar(x_pos, values, color=colors, width=0.8)
+    ax.set_ylabel("p95 Latency (ms)", fontsize=11)
+    ax.set_title("p95 __getitem__ Latency (lower is better)", fontsize=12)
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=10)
     ax.grid(axis="y", linestyle=":", alpha=0.5)
     
     # Plot 2: Samples per second
     ax = axes[1]
-    summary = df.groupby(["format", "access_pattern", "transform"])["samples_per_sec"].mean().reset_index()
+    summary = df.groupby(["format", "access_pattern"])["samples_per_sec"].mean().reset_index()
     
     values = summary["samples_per_sec"].tolist()
-    bars = ax.bar(x_pos, values, color=colors)
-    ax.set_ylabel("Samples per Second")
-    ax.set_title("Throughput (higher is better)")
+    bars = ax.bar(x_pos, values, color=colors, width=0.8)
+    ax.set_ylabel("Samples per Second", fontsize=11)
+    ax.set_title("Throughput (higher is better)", fontsize=12)
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=10)
     ax.grid(axis="y", linestyle=":", alpha=0.5)
     
     fig.savefig(IMAGES_DIR / "pytorch_benchmark_track1.png", dpi=150)
@@ -703,37 +885,53 @@ def plot_track1_results(df: pd.DataFrame) -> None:
 
 def plot_track2_results(df: pd.DataFrame) -> None:
     """Plot Track 2 results: DataLoader throughput."""
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
-    fig.suptitle("Track 2: DataLoader Throughput")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
+    fig.suptitle("Track 2: DataLoader Throughput", fontsize=14)
     
-    color_map = {"parquet": "#2F5C8A", "lance": "#C86A1B"}
+    color_map = {
+        "Parquet": "#2F5C8A",
+        "Parquet (DuckDB)": "#3D7FBF",
+        "Lance": "#C86A1B",
+        "Vortex": "#2E7D4F",
+        "DuckDB": "#B23B3B",
+    }
     
     # Plot 1: Samples per second by num_workers and batch_size
     ax = axes[0]
     summary = df.groupby(["format", "num_workers", "batch_size"])["samples_per_sec"].mean().reset_index()
     
+    # Shorten format names for legend
+    format_abbrev = {
+        "Parquet": "Pq",
+        "Parquet (DuckDB)": "PqD",
+        "Lance": "Ln",
+        "Vortex": "Vx",
+        "DuckDB": "Dk",
+    }
+    
     for format_type in summary["format"].unique():
         format_data = summary[summary["format"] == format_type]
         for batch_size in sorted(format_data["batch_size"].unique()):
             batch_data = format_data[format_data["batch_size"] == batch_size]
+            fmt_abbr = format_abbrev.get(format_type, format_type[:4])
             ax.plot(
                 batch_data["num_workers"],
                 batch_data["samples_per_sec"],
                 marker="o",
-                label=f"{format_type} bs={batch_size}",
+                label=f"{fmt_abbr} bs={batch_size}",
                 color=color_map.get(format_type, "#BAB0AC"),
                 linestyle="-" if batch_size == min(TRACK2_BATCH_SIZES) else "--",
             )
     
-    ax.set_xlabel("Number of Workers")
-    ax.set_ylabel("Samples per Second")
-    ax.set_title("DataLoader Throughput (higher is better)")
-    ax.legend(fontsize=8)
+    ax.set_xlabel("Number of Workers", fontsize=11)
+    ax.set_ylabel("Samples per Second", fontsize=11)
+    ax.set_title("DataLoader Throughput (higher is better)", fontsize=12)
+    ax.legend(fontsize=9, ncol=2)
     ax.grid(True, linestyle=":", alpha=0.5)
     
-    # Plot 2: First batch latency
+    # Plot 2: First batch latency - show only batch_size=16 for clarity
     ax = axes[1]
-    summary = df.groupby(["format", "num_workers", "batch_size"])["first_batch_time"].mean().reset_index()
+    summary = df[df["batch_size"] == 16].groupby(["format", "num_workers"])["first_batch_time"].mean().reset_index()
     
     x_labels = []
     x_pos = []
@@ -742,18 +940,19 @@ def plot_track2_results(df: pd.DataFrame) -> None:
     
     pos = 0
     for _, row in summary.iterrows():
-        label = f"{row['format']}\nw={row['num_workers']}\nbs={row['batch_size']}"
+        fmt_abbr = format_abbrev.get(row['format'], row['format'][:6])
+        label = f"{fmt_abbr}\nw={row['num_workers']}"
         x_labels.append(label)
         x_pos.append(pos)
         colors.append(color_map.get(row['format'], "#BAB0AC"))
         values.append(row['first_batch_time'] * 1000)  # Convert to ms
         pos += 1
     
-    bars = ax.bar(x_pos, values, color=colors)
-    ax.set_ylabel("First Batch Time (ms)")
-    ax.set_title("Worker Startup Overhead (lower is better)")
+    bars = ax.bar(x_pos, values, color=colors, width=0.7)
+    ax.set_ylabel("First Batch Time (ms)", fontsize=11)
+    ax.set_title("Worker Startup (bs=16, lower is better)", fontsize=12)
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=7)
+    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=10)
     ax.grid(axis="y", linestyle=":", alpha=0.5)
     
     fig.savefig(IMAGES_DIR / "pytorch_benchmark_track2.png", dpi=150)
@@ -763,10 +962,16 @@ def plot_track2_results(df: pd.DataFrame) -> None:
 
 def plot_track3_results(df: pd.DataFrame) -> None:
     """Plot Track 3 results: End-to-end model loop."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
-    fig.suptitle("Track 3: End-to-End Model Loop")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+    fig.suptitle("Track 3: End-to-End Model Loop", fontsize=14)
     
-    color_map = {"parquet": "#2F5C8A", "lance": "#C86A1B"}
+    color_map = {
+        "Parquet": "#2F5C8A",
+        "Parquet (DuckDB)": "#3D7FBF",
+        "Lance": "#C86A1B",
+        "Vortex": "#2E7D4F",
+        "DuckDB": "#B23B3B",
+    }
     
     # Plot 1: Step time p50
     ax = axes[0]
@@ -776,8 +981,27 @@ def plot_track3_results(df: pd.DataFrame) -> None:
         summary["format"],
         summary["step_time_p50"] * 1000,  # Convert to ms
         color=[color_map.get(f, "#BAB0AC") for f in summary["format"]],
+        width=0.7,
     )
-    ax.set_ylabel("Step Time p50 (ms)")
+    ax.set_ylabel("Step Time p50 (ms)", fontsize=11)
+    ax.set_title("Step Latency (lower is better)", fontsize=12)
+    ax.set_xticklabels(summary["format"], rotation=30, ha="right", fontsize=10)
+    ax.grid(axis="y", linestyle=":", alpha=0.5)
+    
+    # Plot 2: Data wait fraction
+    ax = axes[1]
+    summary = df.groupby("format")["data_wait_fraction"].mean().reset_index()
+    
+    bars = ax.bar(
+        summary["format"],
+        summary["data_wait_fraction"] * 100,  # Convert to percentage
+        color=[color_map.get(f, "#BAB0AC") for f in summary["format"]],
+        width=0.7,
+    )
+    ax.set_ylabel("Data Wait Fraction (%)", fontsize=11)
+    ax.set_title("Time Waiting on Data (lower is better)", fontsize=12)
+    ax.set_xticklabels(summary["format"], rotation=30, ha="right", fontsize=10)
+    ax.grid(axis="y", linestyle=":", alpha=0.5)
     ax.set_title("Step Latency (lower is better)")
     ax.grid(axis="y", linestyle=":", alpha=0.5)
     
@@ -808,11 +1032,10 @@ def save_summary(
     
     # Convert grouped results to list of dicts for JSON serialization
     track1_summary = []
-    for (fmt, pattern, transform), group in track1_df.groupby(["format", "access_pattern", "transform"]):
+    for (fmt, pattern), group in track1_df.groupby(["format", "access_pattern"]):
         track1_summary.append({
             "format": fmt,
             "access_pattern": pattern,
-            "transform": transform,
             "p50_mean": float(group["p50"].mean()),
             "p95_mean": float(group["p95"].mean()),
             "p99_mean": float(group["p99"].mean()),
@@ -876,8 +1099,8 @@ def save_summary(
 if __name__ == "__main__":
     if RUN_BENCHMARKS:
         print("Generating test data...")
-        table = generate_test_data()
-        write_test_data(table)
+        table, ome_arrays = generate_test_data()
+        write_test_data(table, ome_arrays)
         
         # Run all tracks
         track1_df = run_track1()
@@ -912,7 +1135,7 @@ if __name__ == "__main__":
     print("=" * 80)
     
     print("\nTrack 1: Dataset __getitem__ (mean across runs)")
-    print(track1_df.groupby(["format", "access_pattern", "transform"])[["p50", "p95", "samples_per_sec"]].mean())
+    print(track1_df.groupby(["format", "access_pattern"])[["p50", "p95", "samples_per_sec"]].mean())
     
     print("\nTrack 2: DataLoader Throughput (mean across runs)")
     print(track2_df.groupby(["format", "num_workers", "batch_size"])[["p50", "samples_per_sec", "first_batch_time"]].mean())
