@@ -29,6 +29,8 @@ dependencies = [
   "poethepoet>=0.38",
   "pyarrow>=15",
   "tifffile>=2024.7.24",
+  "torch>=2.6.0",
+  "torchvision>=0.21.0",
   "vortex-data>=0.56",
   "zarr>=3.1.5",
 ]
@@ -45,7 +47,7 @@ package = false
 shell = "uv venv && uv sync && uv run jupyter lab"
 
 [tool.poe.tasks.run-benchmarks]
-shell = "uv run python src/benchmarks/compare_parquet_vortex_lance.py && uv run python src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py"
+shell = "uv run python src/benchmarks/compare_parquet_vortex_lance.py && uv run python src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py && uv run python src/benchmarks/pytorch_benchmark.py"
 
 [tool.poe.tasks.setup]
 shell = "uv venv && uv sync"
