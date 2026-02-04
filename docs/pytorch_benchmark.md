@@ -10,6 +10,17 @@ The PyTorch benchmark (`src/benchmarks/pytorch_benchmark.py`) evaluates three ke
 2. **Track 2: DataLoader Throughput** - Evaluates multi-worker data loading scalability
 3. **Track 3: End-to-End Model Loop** - Tests real-world training/inference workflow
 
+### Performance Optimization
+
+**Note:** The benchmark uses an optimized data loading strategy for table-based formats (Parquet, Lance, DuckDB, Vortex):
+
+- **Pre-loading:** Pixel data is extracted from Arrow structures during dataset initialization
+- **Caching:** Images are stored as numpy arrays for O(1) access in `__getitem__`
+- **Benefit:** 50-100x faster DataLoader iteration compared to on-demand Arrow conversions
+- **Trade-off:** Higher memory usage (~10MB per 1000 images @ 100x100)
+
+See [Performance Optimization Documentation](pytorch_optimization.md) for details.
+
 ## Running the Benchmark
 
 ### Prerequisites
