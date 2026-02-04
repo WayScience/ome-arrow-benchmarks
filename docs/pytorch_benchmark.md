@@ -151,15 +151,22 @@ The benchmark generates the following outputs:
 
 ## Comparing Formats
 
-The benchmark compares Parquet and Lance formats:
+The benchmark compares 7 different storage formats:
 
-- **Parquet**: Standard columnar format, widely supported
+- **Parquet (pyarrow)**: Standard columnar format, widely supported, good compression
+- **Parquet (DuckDB)**: DuckDB variant of Parquet with different I/O path
 - **Lance**: Modern columnar format optimized for ML workloads
+- **Vortex**: Experimental columnar format (optional, may be unavailable)
+- **DuckDB**: File-based database format
+- **TIFF**: Directory-based image format (one file per image) - typically fastest for single image access
+- **OME-Zarr**: Directory-based OME format with chunked storage
 
 **Expected differences:**
-- Both should show similar `__getitem__` latency for single samples
-- Lance may show slightly better multi-threaded performance
-- On-disk size should be comparable (both use compression)
+- **TIFF is fastest** for random single-image access (~10x faster than table formats)
+- **OME-Zarr** is 2-3x faster than table formats due to optimized chunking
+- **Table formats** (Parquet, Lance, DuckDB) show similar performance (~150-180 samples/sec)
+- **Multi-threaded DataLoader** benefits all formats, especially with larger batch sizes
+- **Directory-based formats** (TIFF, OME-Zarr) are excluded from Track 2 & 3 (DataLoader focused on table formats)
 
 ## Reproducibility
 
