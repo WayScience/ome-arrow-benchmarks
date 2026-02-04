@@ -26,13 +26,20 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import lancedb
 import duckdb
-import vortex
-import vortex.io as vxio
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 from ome_arrow import OMEArrow
+
+# Optional imports
+try:
+    import vortex
+    import vortex.io as vxio
+    VORTEX_AVAILABLE = True
+except ImportError:
+    VORTEX_AVAILABLE = False
+    print("Warning: vortex not available, skipping Vortex format")
 
 pd.set_option("display.precision", 4)
 PLOT_TITLE = f"{(__doc__ or 'PyTorch benchmark').splitlines()[0]} (lower is better)"
@@ -106,7 +113,7 @@ VERSIONS = {
     "pyarrow": pa.__version__,
     "lancedb": getattr(lancedb, "__version__", "unknown"),
     "duckdb": duckdb.__version__,
-    "vortex": getattr(vortex, "__version__", _pkg_version("vortex-data", "unknown")),
+    "vortex": getattr(vortex, "__version__", "unavailable") if VORTEX_AVAILABLE else "unavailable",
     "ome-arrow": getattr(__import__("ome_arrow"), "__version__", "unknown"),
     "tifffile": _pkg_version("tifffile"),
     "ome-zarr": _pkg_version("ome-zarr"),
@@ -176,6 +183,8 @@ class OMEArrowDataset(Dataset):
             self.table = db.open_table(lance_table).to_arrow()
             self._length = self.table.num_rows
         elif format_type == "vortex":
+            if not VORTEX_AVAILABLE:
+                raise RuntimeError("Vortex format requires vortex-data package")
             self.table = vortex.open(str(data_path)).to_arrow().read_all()
             self._length = self.table.num_rows
         elif format_type == "duckdb":
@@ -382,9 +391,12 @@ def write_test_data(table: pa.Table, ome_arrays: List[np.ndarray]) -> None:
     print(f"Wrote Lance to {LANCE_PATH}")
 
     # Write Vortex
-    drop_path(VORTEX_PATH)
-    vxio.write(table, str(VORTEX_PATH))
-    print(f"Wrote Vortex to {VORTEX_PATH}")
+    if VORTEX_AVAILABLE:
+        drop_path(VORTEX_PATH)
+        vxio.write(table, str(VORTEX_PATH))
+        print(f"Wrote Vortex to {VORTEX_PATH}")
+    else:
+        print("Skipping Vortex (not available)")
 
     # Write DuckDB
     drop_path(DUCK_PATH)
@@ -448,9 +460,12 @@ def get_available_formats() -> List[Dict[str, Any]]:
         {"name": "Parquet", "type": "parquet", "path": PARQUET_PATH},
         {"name": "Parquet (DuckDB)", "type": "parquet_duck", "path": PARQUET_DUCK_PATH},
         {"name": "Lance", "type": "lance", "path": LANCE_PATH},
-        {"name": "Vortex", "type": "vortex", "path": VORTEX_PATH},
         {"name": "DuckDB", "type": "duckdb", "path": DUCK_PATH},
     ]
+    
+    # Add Vortex if available
+    if VORTEX_AVAILABLE and VORTEX_PATH.exists():
+        formats.append({"name": "Vortex", "type": "vortex", "path": VORTEX_PATH})
     
     # Add TIFF if available
     try:
