@@ -85,6 +85,7 @@ DUCK_TABLE = "bench"
 RESULTS_TRACK1_PATH = DATA_DIR / "pytorch_benchmark_track1.parquet"
 RESULTS_TRACK2_PATH = DATA_DIR / "pytorch_benchmark_track2.parquet"
 RESULTS_TRACK3_PATH = DATA_DIR / "pytorch_benchmark_track3.parquet"
+RESULTS_TRACK4_PATH = DATA_DIR / "pytorch_benchmark_track4.parquet"
 SUMMARY_PATH = DATA_DIR / "pytorch_benchmark_summary.json"
 
 # Check if we need to run benchmarks (results don't exist)
@@ -92,6 +93,7 @@ RUN_BENCHMARKS = not (
     RESULTS_TRACK1_PATH.exists()
     and RESULTS_TRACK2_PATH.exists()
     and RESULTS_TRACK3_PATH.exists()
+    and RESULTS_TRACK4_PATH.exists()
 )
 
 # Check if we need to generate test data (any format data is missing)
@@ -410,6 +412,118 @@ class OMEArrowDataset(Dataset):
         return img_tensor
 
 
+class OMEArrowDatasetNumpy(OMEArrowDataset):
+    """PyTorch Dataset that returns numpy arrays instead of torch tensors.
+    
+    This variant allows benchmarking the performance of loading data into numpy
+    arrays separately from the torch tensor conversion overhead.
+    
+    Inherits from OMEArrowDataset but overrides __getitem__ to return numpy arrays.
+    """
+
+    def __getitem__(self, idx: int) -> np.ndarray:
+        """Get an image at the given index.
+        
+        Returns:
+            np.ndarray: Image array of shape (C, H, W) as float32
+        """
+        # Handle directory-based formats (TIFF, OME-Zarr)
+        if self.format_type == "tiff":
+            import tifffile
+            img_array = tifffile.imread(str(self.image_paths[idx]))
+            # TIFF typically stores as (Z, Y, X) or (T, C, Z, Y, X)
+            # Squeeze singleton dimensions
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                img_array = np.squeeze(img_array, axis=-3)
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]
+        elif self.format_type == "ome_zarr":
+            import zarr
+            zarr_dir = self.zarr_paths[idx]
+            grp = zarr.open_group(str(zarr_dir), mode="r")
+            if "0" in grp:
+                img_array = grp["0"][...]
+            else:
+                raise ValueError(f"No '0' group found in OME-Zarr at {zarr_dir}")
+            # Squeeze singleton dimensions
+            while img_array.ndim > 3 and img_array.shape[0] == 1:
+                img_array = img_array.squeeze(0)
+            if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                img_array = np.squeeze(img_array, axis=-3)
+            if img_array.ndim == 2:
+                img_array = img_array[np.newaxis, :, :]
+        else:
+            # Table-based formats - use pre-loaded pixel cache
+            if self.pixel_cache is not None:
+                # Fast path: use pre-loaded numpy arrays
+                img_array = self.pixel_cache[idx].copy()  # Copy to avoid mutation
+            else:
+                # Fallback: extract from Arrow table (slower)
+                ome_struct = self.table["ome_image"][idx].as_py()
+                
+                chunks = ome_struct.get("chunks", [])
+                if not chunks:
+                    raise ValueError(f"No chunks found in OME-Arrow struct at index {idx}")
+                
+                chunk = chunks[0]
+                pixels = chunk["pixels"]
+                shape_x = chunk["shape_x"]
+                shape_y = chunk["shape_y"]
+                shape_z = chunk["shape_z"]
+                
+                img_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                
+                # Handle multi-chunk
+                if len(chunks) > 1:
+                    pixels_meta = ome_struct.get("pixels_meta", {})
+                    size_t = pixels_meta.get("size_t", 1)
+                    size_c = pixels_meta.get("size_c", 1)
+                    
+                    all_chunks = []
+                    for chunk in sorted(chunks, key=lambda c: (c['t'], c['c'])):
+                        pixels = chunk["pixels"]
+                        shape_x = chunk["shape_x"]
+                        shape_y = chunk["shape_y"]
+                        shape_z = chunk["shape_z"]
+                        chunk_array = np.array(pixels, dtype=np.uint8).reshape(shape_z, shape_y, shape_x)
+                        all_chunks.append(chunk_array)
+                    
+                    img_array = np.stack(all_chunks, axis=0)
+                    if size_t > 1 and size_c > 1:
+                        img_array = img_array.reshape(size_t, size_c, shape_z, shape_y, shape_x)
+                
+                # Squeeze singleton dimensions
+                while img_array.ndim > 3 and img_array.shape[0] == 1:
+                    img_array = img_array.squeeze(0)
+                if img_array.ndim > 3 and img_array.shape[-3] == 1:
+                    img_array = np.squeeze(img_array, axis=-3)
+                
+                # Ensure (C, H, W) format
+                if img_array.ndim == 2:
+                    img_array = img_array[np.newaxis, :, :]
+        
+        # Crop if requested
+        if self.crop_size is not None:
+            crop_h, crop_w = self.crop_size
+            h, w = img_array.shape[-2:]
+            if h >= crop_h and w >= crop_w:
+                start_h = (h - crop_h) // 2
+                start_w = (w - crop_w) // 2
+                img_array = img_array[..., start_h:start_h+crop_h, start_w:start_w+crop_w]
+        
+        # Convert to float32 and normalize to [0, 1]
+        img_array = img_array.astype(np.float32)
+        if img_array.max() > 1.0:
+            img_array = img_array / 255.0
+        
+        # Note: transforms are not applied in numpy mode
+        # Transforms would require torch tensors
+        
+        return img_array
+
+
 class SimpleEmbeddingModel(nn.Module):
     """Simple CNN for embedding extraction in Track 3."""
 
@@ -618,6 +732,103 @@ def benchmark_dataset_getitem(
     stats["num_samples"] = num_samples
     
     return stats
+
+
+def benchmark_numpy_vs_torch(
+    format_config: Dict[str, Any],
+    num_samples: int = 100,
+    warmup: int = 10,
+) -> Dict[str, Any]:
+    """Benchmark numpy array loading vs torch tensor conversion.
+    
+    Measures:
+    1. Numpy array loading time (using OMEArrowDatasetNumpy)
+    2. Torch tensor conversion time (from numpy to torch)
+    3. Total time (numpy + torch, using OMEArrowDataset)
+    
+    Args:
+        format_config: Format configuration dict with 'name', 'type', 'path'
+        num_samples: Number of samples to benchmark
+        warmup: Number of warmup samples
+        
+    Returns:
+        Dict with timing statistics for numpy vs torch operations
+    """
+    # Create numpy-only dataset
+    dataset_numpy = OMEArrowDatasetNumpy(
+        data_path=format_config["path"],
+        format_type=format_config["type"],
+        transform=None,
+        lance_table=LANCE_TABLE,
+        duck_table=DUCK_TABLE,
+    )
+    
+    # Create torch dataset
+    dataset_torch = OMEArrowDataset(
+        data_path=format_config["path"],
+        format_type=format_config["type"],
+        transform=None,
+        lance_table=LANCE_TABLE,
+        duck_table=DUCK_TABLE,
+    )
+    
+    indices = list(range(min(num_samples + warmup, len(dataset_numpy))))
+    
+    # Warmup both datasets
+    for idx in indices[:warmup]:
+        _ = dataset_numpy[idx]
+        _ = dataset_torch[idx]
+    
+    # Benchmark 1: Numpy-only loading
+    numpy_times = []
+    for idx in indices[warmup:warmup + num_samples]:
+        t0 = time.perf_counter()
+        _ = dataset_numpy[idx]
+        numpy_times.append(time.perf_counter() - t0)
+    
+    # Benchmark 2: Torch tensor conversion from numpy
+    # First get numpy arrays, then measure conversion time
+    numpy_arrays = [dataset_numpy[idx] for idx in indices[warmup:warmup + num_samples]]
+    conversion_times = []
+    for arr in numpy_arrays:
+        t0 = time.perf_counter()
+        _ = torch.from_numpy(arr).float()
+        conversion_times.append(time.perf_counter() - t0)
+    
+    # Benchmark 3: Total time (numpy + torch in one call)
+    torch_times = []
+    for idx in indices[warmup:warmup + num_samples]:
+        t0 = time.perf_counter()
+        _ = dataset_torch[idx]
+        torch_times.append(time.perf_counter() - t0)
+    
+    numpy_stats = percentile_stats(numpy_times)
+    conversion_stats = percentile_stats(conversion_times)
+    torch_stats = percentile_stats(torch_times)
+    
+    return {
+        "format": format_config["name"],
+        "num_samples": num_samples,
+        # Numpy loading times
+        "numpy_mean": numpy_stats["mean"],
+        "numpy_p50": numpy_stats["p50"],
+        "numpy_p95": numpy_stats["p95"],
+        "numpy_p99": numpy_stats["p99"],
+        # Tensor conversion times
+        "conversion_mean": conversion_stats["mean"],
+        "conversion_p50": conversion_stats["p50"],
+        "conversion_p95": conversion_stats["p95"],
+        "conversion_p99": conversion_stats["p99"],
+        # Total torch times
+        "torch_mean": torch_stats["mean"],
+        "torch_p50": torch_stats["p50"],
+        "torch_p95": torch_stats["p95"],
+        "torch_p99": torch_stats["p99"],
+        # Derived metrics
+        "conversion_overhead_pct": (conversion_stats["mean"] / torch_stats["mean"] * 100) if torch_stats["mean"] > 0 else 0,
+        "numpy_samples_per_sec": 1.0 / numpy_stats["mean"] if numpy_stats["mean"] > 0 else 0,
+        "torch_samples_per_sec": 1.0 / torch_stats["mean"] if torch_stats["mean"] > 0 else 0,
+    }
 
 
 def run_track1() -> pd.DataFrame:
@@ -919,6 +1130,48 @@ def run_track3() -> pd.DataFrame:
 
 
 # ============================================================================
+# Track 4: Numpy vs Torch Tensor Comparison
+# ============================================================================
+
+def run_track4() -> pd.DataFrame:
+    """Run Track 4: Compare numpy array loading vs torch tensor conversion."""
+    print("\n" + "=" * 80)
+    print("Track 4: Numpy Array vs Torch Tensor Comparison")
+    print("=" * 80)
+    
+    results = []
+    formats = get_available_formats()
+    
+    # Use only table-based formats for this comparison
+    table_formats = [fmt for fmt in formats if fmt["type"] not in ["tiff", "ome_zarr"]]
+    
+    for fmt in table_formats:
+        print(f"\n[Track 4] format={fmt['name']}")
+        
+        for run_idx in range(TRACK1_REPEATS):
+            gc.collect()
+            
+            stats = benchmark_numpy_vs_torch(
+                fmt,
+                num_samples=TRACK1_BENCHMARK_SAMPLES,
+                warmup=TRACK1_WARMUP_SAMPLES,
+            )
+            
+            stats["run"] = run_idx
+            results.append(stats)
+            
+            print(f"  Run {run_idx + 1}/{TRACK1_REPEATS}:")
+            print(f"    Numpy:      p50={stats['numpy_p50']*1000:.3f}ms, "
+                  f"throughput={stats['numpy_samples_per_sec']:.1f} samples/s")
+            print(f"    Conversion: p50={stats['conversion_p50']*1000:.3f}ms, "
+                  f"overhead={stats['conversion_overhead_pct']:.1f}%")
+            print(f"    Torch:      p50={stats['torch_p50']*1000:.3f}ms, "
+                  f"throughput={stats['torch_samples_per_sec']:.1f} samples/s")
+    
+    return pd.DataFrame(results)
+
+
+# ============================================================================
 # Plotting and Summary
 # ============================================================================
 
@@ -1124,10 +1377,76 @@ def plot_track3_results(df: pd.DataFrame) -> None:
     print(f"Saved Track 3 plot to {IMAGES_DIR / 'pytorch_benchmark_track3.png'}")
 
 
+def plot_track4_results(df: pd.DataFrame) -> None:
+    """Plot Track 4 results: Numpy vs Torch comparison."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+    fig.suptitle("Track 4: Numpy Array vs Torch Tensor Loading", fontsize=14)
+    
+    color_map = {
+        "Parquet": "#2F5C8A",
+        "Parquet (DuckDB)": "#3D7FBF",
+        "Lance": "#C86A1B",
+        "Vortex": "#2E7D4F",
+        "DuckDB": "#B23B3B",
+    }
+    
+    # Plot 1: Comparison of loading times (p50)
+    ax = axes[0]
+    summary = df.groupby("format").agg({
+        "numpy_p50": "mean",
+        "conversion_p50": "mean", 
+        "torch_p50": "mean",
+    }).reset_index()
+    
+    x = np.arange(len(summary))
+    width = 0.25
+    
+    bars1 = ax.bar(x - width, summary["numpy_p50"] * 1000, width, 
+                   label='Numpy Loading', color='#2E7D4F')
+    bars2 = ax.bar(x, summary["conversion_p50"] * 1000, width,
+                   label='Tensor Conversion', color='#C86A1B')
+    bars3 = ax.bar(x + width, summary["torch_p50"] * 1000, width,
+                   label='Total (Torch)', color='#2F5C8A')
+    
+    ax.set_ylabel("Time (ms)", fontsize=11)
+    ax.set_title("p50 Loading Time Breakdown (lower is better)", fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(summary["format"], rotation=30, ha="right", fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(axis="y", linestyle=":", alpha=0.5)
+    
+    # Plot 2: Conversion overhead percentage
+    ax = axes[1]
+    summary = df.groupby("format")["conversion_overhead_pct"].mean().reset_index()
+    
+    bars = ax.bar(
+        summary["format"],
+        summary["conversion_overhead_pct"],
+        color=[color_map.get(f, "#BAB0AC") for f in summary["format"]],
+        width=0.7,
+    )
+    ax.set_ylabel("Conversion Overhead (%)", fontsize=11)
+    ax.set_title("Tensor Conversion as % of Total Time", fontsize=12)
+    ax.set_xticklabels(summary["format"], rotation=30, ha="right", fontsize=10)
+    ax.grid(axis="y", linestyle=":", alpha=0.5)
+    
+    # Add percentage labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%',
+                ha='center', va='bottom', fontsize=9)
+    
+    fig.savefig(IMAGES_DIR / "pytorch_benchmark_track4.png", dpi=150)
+    plt.close(fig)
+    print(f"Saved Track 4 plot to {IMAGES_DIR / 'pytorch_benchmark_track4.png'}")
+
+
 def save_summary(
     track1_df: pd.DataFrame,
     track2_df: pd.DataFrame,
     track3_df: pd.DataFrame,
+    track4_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """Save a JSON summary of all benchmark results."""
     
@@ -1163,6 +1482,20 @@ def save_summary(
             "images_per_sec_mean": float(group["images_per_sec"].mean()),
         })
     
+    # Track 4 summary (if available)
+    track4_summary = []
+    if track4_df is not None and not track4_df.empty:
+        for fmt, group in track4_df.groupby("format"):
+            track4_summary.append({
+                "format": fmt,
+                "numpy_p50_mean": float(group["numpy_p50"].mean()),
+                "conversion_p50_mean": float(group["conversion_p50"].mean()),
+                "torch_p50_mean": float(group["torch_p50"].mean()),
+                "conversion_overhead_pct_mean": float(group["conversion_overhead_pct"].mean()),
+                "numpy_samples_per_sec_mean": float(group["numpy_samples_per_sec"].mean()),
+                "torch_samples_per_sec_mean": float(group["torch_samples_per_sec"].mean()),
+            })
+    
     summary = {
         "metadata": {
             "versions": VERSIONS,
@@ -1186,6 +1519,12 @@ def save_summary(
             "results": track3_summary,
         },
     }
+    
+    if track4_summary:
+        summary["track4"] = {
+            "description": "Numpy array vs Torch tensor comparison",
+            "results": track4_summary,
+        }
     
     with open(SUMMARY_PATH, "w") as f:
         json.dump(summary, f, indent=2)
@@ -1218,20 +1557,27 @@ if __name__ == "__main__":
         track3_df = run_track3()
         track3_df.to_parquet(RESULTS_TRACK3_PATH, index=False)
         print(f"Track 3 results saved to {RESULTS_TRACK3_PATH}")
+        
+        track4_df = run_track4()
+        track4_df.to_parquet(RESULTS_TRACK4_PATH, index=False)
+        print(f"Track 4 results saved to {RESULTS_TRACK4_PATH}")
     else:
         print("Loading existing benchmark results...")
         track1_df = pd.read_parquet(RESULTS_TRACK1_PATH)
         track2_df = pd.read_parquet(RESULTS_TRACK2_PATH)
         track3_df = pd.read_parquet(RESULTS_TRACK3_PATH)
+        track4_df = pd.read_parquet(RESULTS_TRACK4_PATH) if RESULTS_TRACK4_PATH.exists() else pd.DataFrame()
     
     # Generate plots
     print("\nGenerating plots...")
     plot_track1_results(track1_df)
     plot_track2_results(track2_df)
     plot_track3_results(track3_df)
+    if not track4_df.empty:
+        plot_track4_results(track4_df)
     
     # Save summary
-    save_summary(track1_df, track2_df, track3_df)
+    save_summary(track1_df, track2_df, track3_df, track4_df)
     
     # Print summary statistics
     print("\n" + "=" * 80)
@@ -1246,5 +1592,9 @@ if __name__ == "__main__":
     
     print("\nTrack 3: End-to-End Model Loop (mean across runs)")
     print(track3_df.groupby("format")[["step_time_p50", "data_wait_fraction", "images_per_sec"]].mean())
+    
+    if not track4_df.empty:
+        print("\nTrack 4: Numpy vs Torch Comparison (mean across runs)")
+        print(track4_df.groupby("format")[["numpy_p50", "conversion_p50", "torch_p50", "conversion_overhead_pct"]].mean())
     
     print("\nBenchmark complete!")
