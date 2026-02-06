@@ -4,11 +4,12 @@ This document describes the PyTorch-focused benchmark for the OME-Arrow file for
 
 ## Overview
 
-The PyTorch benchmark (`src/benchmarks/pytorch_benchmark.py`) evaluates three key aspects of PyTorch integration:
+The PyTorch benchmark (`src/benchmarks/pytorch_benchmark.py`) evaluates four key aspects of PyTorch integration:
 
 1. **Track 1: Dataset `__getitem__` Microbenchmark** - Measures low-level data access performance
 2. **Track 2: DataLoader Throughput** - Evaluates multi-worker data loading scalability
 3. **Track 3: End-to-End Model Loop** - Tests real-world training/inference workflow
+4. **Track 4: Numpy vs Torch Comparison** - Analyzes the overhead of numpy-to-torch tensor conversion
 
 ### Performance Optimization
 
@@ -84,6 +85,7 @@ The benchmark generates the following outputs:
 - `pytorch_benchmark_track1.parquet` - Raw Track 1 results
 - `pytorch_benchmark_track2.parquet` - Raw Track 2 results  
 - `pytorch_benchmark_track3.parquet` - Raw Track 3 results
+- `pytorch_benchmark_track4.parquet` - Raw Track 4 results (numpy vs torch)
 - `pytorch_benchmark_summary.json` - Aggregated summary with metadata
 
 ### Plots (in `images/`)
@@ -91,6 +93,7 @@ The benchmark generates the following outputs:
 - `pytorch_benchmark_track1.png` - Dataset `__getitem__` latency and throughput
 - `pytorch_benchmark_track2.png` - DataLoader throughput and worker startup overhead
 - `pytorch_benchmark_track3.png` - End-to-end step time and data wait fraction
+- `pytorch_benchmark_track4.png` - Numpy vs torch tensor conversion comparison
 
 ## Understanding the Results
 
@@ -159,6 +162,38 @@ The benchmark generates the following outputs:
 **Optimization guidance:**
 - High data wait fraction → Increase num_workers, batch size, or optimize data loading
 - Low throughput → Profile model forward pass, consider GPU acceleration
+
+### Track 4: Numpy Array vs Torch Tensor Comparison
+
+**What it measures:**
+- Performance breakdown of loading data into numpy arrays vs torch tensors
+- Overhead of numpy-to-torch tensor conversion
+- Total end-to-end time comparison
+
+**Key metrics:**
+- **Numpy loading time** (p50, p95, p99): Time to load data into numpy arrays
+- **Conversion time** (p50, p95, p99): Time to convert numpy arrays to torch tensors
+- **Total torch time** (p50, p95, p99): Combined numpy + conversion time
+- **Conversion overhead %**: Percentage of total time spent on tensor conversion
+- **Throughput**: Samples per second for numpy vs torch
+
+**Interpreting results:**
+- **Low conversion overhead (<10%)**: Tensor conversion is negligible; numpy loading dominates
+- **Moderate overhead (10-30%)**: Tensor conversion is measurable but acceptable
+- **High overhead (>30%)**: Tensor conversion is significant; consider optimizations
+
+**Why this matters:**
+- Understanding the cost of numpy-to-torch conversion helps identify optimization opportunities
+- If conversion overhead is high, consider:
+  - Using `torch.from_numpy()` with shared memory (zero-copy)
+  - Keeping data in torch tensors throughout the pipeline
+  - Batching conversions to amortize overhead
+- If conversion overhead is low, focus optimization efforts on data loading itself
+
+**Typical patterns:**
+- For small images, conversion overhead tends to be higher (10-30%)
+- For large images, I/O and decompression dominate, conversion is <10%
+- Table formats (Parquet, Lance) show more conversion overhead than direct formats (TIFF)
 
 ## Comparing Formats
 
