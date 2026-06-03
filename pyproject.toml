@@ -24,18 +24,18 @@ dependencies = [
   "numcodecs>=0.16.5",
   "numpy>=2.4.6",
   "ome-arrow>=0.0.9",
-  "ome-zarr>=0.16.0",
+  "ome-zarr>=0.16",
   "pandas>=3.0.3",
-  "poethepoet>=0.46.0",
-  "pyarrow>=24.0.0",
+  "poethepoet>=0.46",
+  "pyarrow>=24",
   "tifffile>=2026.3.3",
-  "vortex-data>=0.73.0",
+  "vortex-data>=0.73",
   "zarr>=3.1.6",
 ]
 
 [dependency-groups]
 dev = [
-  "poethepoet>=0.46.0",
+  "poethepoet>=0.46",
 ]
 
 [tool.uv]
