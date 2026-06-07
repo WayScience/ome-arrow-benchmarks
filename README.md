@@ -101,9 +101,9 @@ catalog manifests. Those manifests currently point to
 [`cytomining/CytoDataFrame`](https://github.com/cytomining/CytoDataFrame) test
 data and declare `CC-BY-4.0` licensing.
 
-| OME-IRIS dataset ID | Local source identifier | Upstream source |
-| --- | --- | --- |
-| `nf1-cellpainting-shrunken` | `NF1_cellpainting_data_shrunken` | [CytoDataFrame NF1 Cell Painting shrunken](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/NF1_cellpainting_data_shrunken) |
-| `jump-plate-example` | `JUMP_plate_BR00117006` | [CytoDataFrame JUMP plate BR00117006](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/JUMP_plate_BR00117006) |
-| `pediatric-cancer-atlas` | `pediatric_cancer_atlas_profiling` | [CytoDataFrame pediatric cancer atlas profiling](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/pediatric_cancer_atlas_profiling) |
-| `nuclei-3d` | `CP_tutorial_3D_noise_nuclei_segmentation` | [CytoDataFrame 3D nuclei example](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/CP_tutorial_3D_noise_nuclei_segmentation) |
+| OME-IRIS dataset ID         | Local source identifier                    | Upstream source                                                                                                                                               |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nf1-cellpainting-shrunken` | `NF1_cellpainting_data_shrunken`           | [CytoDataFrame NF1 Cell Painting shrunken](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/NF1_cellpainting_data_shrunken)         |
+| `jump-plate-example`        | `JUMP_plate_BR00117006`                    | [CytoDataFrame JUMP plate BR00117006](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/JUMP_plate_BR00117006)                       |
+| `pediatric-cancer-atlas`    | `pediatric_cancer_atlas_profiling`         | [CytoDataFrame pediatric cancer atlas profiling](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/pediatric_cancer_atlas_profiling) |
+| `nuclei-3d`                 | `CP_tutorial_3D_noise_nuclei_segmentation` | [CytoDataFrame 3D nuclei example](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/CP_tutorial_3D_noise_nuclei_segmentation)                  |
