@@ -25,7 +25,7 @@ All are small representative subsets drawn from [`cytomining/CytoDataFrame`](htt
 
 > Read this section for a quick summary. The individual benchmark sections below provide the full picture.
 
-- **Pixel read performance is competitive.** OA NT (OME-Arrow nested table) Vortex is consistently the fastest read format across all tested datasets — often faster than OME-TIFF. OA NT Parquet matches or beats OME-Zarr in every dataset. OA DS (OMEArrowDataset) Parquet is the slowest OME-Arrow variant but remains in the same order of magnitude as the other formats.
+- **OME-Arrow reads faster and writes faster than OME-Zarr.** OA NT Parquet writes 2.6–3.4× faster than OME-Zarr across all tested datasets, and reads 20–50% faster for bulk access. OA NT Vortex is 6–14× faster than OME-Zarr for bulk reads. For random single-image access, OA NT Parquet is slower than Zarr, but OA NT Vortex and Lance are both faster. OA DS (OMEArrowDataset) Parquet is the slowest OME-Arrow variant but remains comparable to OME-Zarr.
 - **Storage backend is swappable.** OME-Arrow's compliance with multiple backends — [Apache Parquet](https://parquet.apache.org), [Vortex](https://github.com/spiraldb/vortex), and [LanceDB](https://lancedb.com) — means the same image data model works across ecosystems. Users can choose the backend that best fits their performance profile or tooling without changing how images are represented.
 - **Profiling joins are fast.** Joining feature rows to image metadata via an OME-Arrow nested table takes ~4 ms at observation scale (~15 k rows) — comparable to a plain Parquet path join (~3 ms). The small overhead buys structured, queryable image metadata in place of opaque file paths.
 - **Pre-converting removes the join at query time, at the cost of upfront conversion.** When profile and image data are co-located in a single OME-Arrow table, metadata reads drop to ~1 ms because no join is performed at query time. Pre-conversion is worth considering for read-heavy workloads where the upfront cost amortises quickly.
@@ -51,7 +51,9 @@ The next figure adds a single OME image column to the same wide-table shape, so 
 
 Compares table formats that embed a single OME image column, alongside directory-per-image TIFF and OME-Zarr as baselines.
 
-The write, read, and size panels together show that OME-Arrow trades some write/read speed for the ability to query image metadata through SQL or Arrow compute expressions without opening individual files.
+OME-Arrow nested tables (Parquet backend) write 2.6–3.4× faster than OME-Zarr and read 20–50% faster for bulk access across all tested datasets.
+OA NT Vortex extends that read advantage to 6–14×.
+The trade-off: OME-Arrow embeds images in a queryable table structure, enabling SQL joins and Arrow compute over image metadata without opening individual files, whereas OME-Zarr stores each image as a separate directory hierarchy optimised for chunked array access.
 
 ![OME-Arrow image-column benchmark](figures/compare_ome_arrow_only_summary.png)
 
@@ -62,7 +64,8 @@ The same 15 images are converted into four formats — OME-Arrow Parquet nested 
 
 **How to read this figure:** the bars are grouped by dataset (x-axis) and colored by format. Compare formats within each dataset group to understand relative trade-offs; compare across dataset groups to check whether the pattern holds for different image types and sizes.
 
-OA NT and OA DS are competitive with OME-TIFF and OME-Zarr for write time.
+OA NT writes faster than OME-Zarr (~3× on NF1) and reads faster for bulk access (~1.5×); OA NT Vortex extends the read advantage to ~12×.
+For random single-image reads, OA NT Parquet is slower than OME-Zarr, but OA NT Vortex and Lance are both faster.
 Write time for OME-TIFF here reflects conversion from source TIFF to OME-TIFF — in later benchmarks where TIFF is used as the source reference rather than a conversion target, it has no write bar.
 For read time, OME-TIFF has an advantage for raw pixel throughput because it avoids Arrow's struct materialization overhead.
 File size varies by dataset because OME-IRIS datasets differ in image count, resolution, and bit-depth — they are not directly normalized per image here.
