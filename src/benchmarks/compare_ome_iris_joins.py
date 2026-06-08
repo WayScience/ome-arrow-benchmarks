@@ -97,7 +97,7 @@ OA_KEY_TEXT = (
     "OA NT = OME-Arrow nested table; OA DS = OMEArrowDataset; "
     "Parquet/Vortex/Lance = table backend"
 )
-SOURCE_NOTE = "Datasets: OME-IRIS catalog entries backed by cytomining/CytoDataFrame test data (CC-BY-4.0)."
+SOURCE_NOTE = "Datasets: OME-IRIS catalog entries."
 
 
 def cache_is_current() -> bool:
@@ -1340,29 +1340,18 @@ def plot_results(summary_df: pd.DataFrame, table_summary: pd.DataFrame) -> None:
         "converted OME-TIFF": "#C86A1B",
         "converted OME-Zarr": "#6B7280",
     }
+    # Plain-english bar labels — no abbreviation key needed.
     operation_labels = {
-        "Path Parquet join, observation scale": "PJP",
-        "OA NT Parquet metadata join, observation scale": "OJP",
-        "Path Parquet join, image payload scale": "PJI",
-        "OA NT Parquet payload join, image payload scale": "OJI",
-        "Converted OA NT Parquet metadata scan": "OMS",
-        "OME-TIFF metadata scan": "TMS",
-        "OME-Zarr metadata scan": "ZMS",
-        "Converted OA NT Parquet payload scan": "OVS",
-        "OME-TIFF payload scan": "TRP",
-        "OME-Zarr payload scan": "ZRP",
-    }
-    operation_key = {
-        "PJP": "path join, profile rows",
-        "OJP": "OA metadata join, profile rows",
-        "PJI": "path join, image rows",
-        "OJI": "OA value join, image rows",
-        "OMS": "OA metadata scan",
-        "TMS": "TIFF metadata scan",
-        "ZMS": "Zarr metadata scan",
-        "OVS": "OA value scan",
-        "TRP": "TIFF pixel read",
-        "ZRP": "Zarr pixel read",
+        "Path Parquet join, observation scale": "Path join\nprofile rows",
+        "OA NT Parquet metadata join, observation scale": "OA meta join\nprofile rows",
+        "Path Parquet join, image payload scale": "Path join\nimage rows",
+        "OA NT Parquet payload join, image payload scale": "OA pixel join\nimage rows",
+        "Converted OA NT Parquet metadata scan": "OA meta read\n(converted)",
+        "OME-TIFF metadata scan": "TIFF meta\nread",
+        "OME-Zarr metadata scan": "Zarr meta\nread",
+        "Converted OA NT Parquet payload scan": "OA pixel read\n(converted)",
+        "OME-TIFF payload scan": "TIFF pixel\nread",
+        "OME-Zarr payload scan": "Zarr pixel\nread",
     }
     table_labels = {
         "observations": "profile rows",
@@ -1388,33 +1377,41 @@ def plot_results(summary_df: pd.DataFrame, table_summary: pd.DataFrame) -> None:
     labels = [operation_labels.get(name, name) for name in summary_df["operation"]]
     x = np.arange(len(summary_df))
 
-    plt.rcParams.update({"font.size": 10})
-    fig, axes = plt.subplots(2, 2, figsize=(20, 10.5))
-    fig.suptitle("Join and converted image workload benchmark")
+    plt.rcParams.update({"font.size": 11})
+    fig, axes = plt.subplots(2, 2, figsize=(20, 11))
+    fig.suptitle(
+        "NF1 Cell Painting: profiling joins and image format read times",
+        fontsize=14,
+    )
 
     bars = axes[0, 0].bar(x, summary_df["avg_seconds"] * 1000, color=colors)
-    axes[0, 0].set_title("Latency avg (ms)")
+    axes[0, 0].set_title("Query time (ms)")
     axes[0, 0].set_ylabel("milliseconds")
     axes[0, 0].set_xticks(x)
-    axes[0, 0].set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    axes[0, 0].set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
     axes[0, 0].grid(axis="y", linestyle=":", alpha=0.5)
     label_vertical_bars(axes[0, 0], bars, "%.1f")
 
     bars = axes[0, 1].bar(x, summary_df["result_size_mb"], color=colors)
-    axes[0, 1].set_title("Materialized result size (MB)")
+    axes[0, 1].set_title("Result size (MB)")
     axes[0, 1].set_ylabel("MB")
     axes[0, 1].set_xticks(x)
-    axes[0, 1].set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    axes[0, 1].set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
     axes[0, 1].grid(axis="y", linestyle=":", alpha=0.5)
     label_vertical_bars(axes[0, 1], bars, "%.2f")
 
     bars = axes[1, 0].bar(x, summary_df["rows_returned"], color=colors)
-    axes[1, 0].set_title("Rows returned (log scale)")
+    # The row counts differ because joins at "profile rows" scale expand to ~15 k rows
+    # (one per repeated observation), while "image rows" scale has one row per real image (15).
+    axes[1, 0].set_title(
+        "Rows returned per query (log scale)\n"
+        "Profile-scale: ~15 k rows (repeated observations); image-scale: 15 rows (one per image)"
+    )
     axes[1, 0].set_ylabel("rows")
     axes[1, 0].set_yscale("log")
     axes[1, 0].set_ylim(1, max(summary_df["rows_returned"]) * 3)
     axes[1, 0].set_xticks(x)
-    axes[1, 0].set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    axes[1, 0].set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
     axes[1, 0].grid(axis="y", linestyle=":", alpha=0.5)
     label_log_bars(axes[1, 0], bars, "%.0f")
 
@@ -1432,24 +1429,36 @@ def plot_results(summary_df: pd.DataFrame, table_summary: pd.DataFrame) -> None:
         [table_labels.get(name, name) for name in table_plot["table"]],
         rotation=25,
         ha="right",
-        fontsize=8,
+        fontsize=9,
     )
     axes[1, 1].grid(axis="y", linestyle=":", alpha=0.5)
     label_vertical_bars(axes[1, 1], bars, "%.2f")
 
-    add_colored_figure_key(
-        fig,
-        [
-            ("Path tables", color_map["without OME-Arrow"]),
-            ("OA NT Parquet", color_map["with OA NT Parquet"]),
-            ("OME-TIFF", color_map["converted OME-TIFF"]),
-            ("OME-Zarr", color_map["converted OME-Zarr"]),
-        ],
-        extra="; ".join(f"{code} = {text}" for code, text in operation_key.items()),
+    legend_handles = [
+        Patch(
+            facecolor=color_map["without OME-Arrow"],
+            label="Parquet path join (no OME-Arrow)",
+        ),
+        Patch(
+            facecolor=color_map["with OA NT Parquet"],
+            label="OA NT Parquet (OME-Arrow nested table)",
+        ),
+        Patch(facecolor=color_map["converted OME-TIFF"], label="OME-TIFF"),
+        Patch(facecolor=color_map["converted OME-Zarr"], label="OME-Zarr"),
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.01),
+        ncol=4,
+        frameon=True,
+        fontsize=10,
+        title=OA_KEY_TEXT,
+        title_fontsize=8,
     )
 
-    fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
-    fig.tight_layout(rect=(0, 0.19, 1, 0.94))
+    fig.text(0.5, 0.0, SOURCE_NOTE, ha="center", fontsize=8)
+    fig.tight_layout(rect=(0, 0.14, 1, 0.94))
     fig.savefig(FIGURES_DIR / "compare_ome_iris_joins_detail.png", dpi=150)
     plt.close(fig)
 
@@ -1474,7 +1483,7 @@ def label_vertical_bars(ax, bars, fmt="%.3f") -> None:
             ha="center",
             va="top",
             color="white",
-            fontsize=8,
+            fontsize=9,
         )
 
 
@@ -1493,8 +1502,7 @@ def label_log_bars(ax, bars, fmt="%.0f") -> None:
             ha="center",
             va=va,
             color=color,
-            fontsize=8,
-            rotation=90,
+            fontsize=9,
         )
 
 
@@ -1567,11 +1575,12 @@ def plot_format_diagnostics(format_summary: pd.DataFrame) -> None:
         "OME-Arrow chunks zstd, rows, open": "#5A6B3A",
         "OME-Arrow chunks none, NumPy, open": "#B23B3B",
     }
+    # Labels spell out "OA Dataset" so "DS" does not need decoding.
     label_map = {
-        "OME-Arrow chunks zstd, NumPy, reopen": "OA DS\nParquet\nreopen",
-        "OME-Arrow chunks zstd, NumPy, open": "OA DS\nParquet\nopen",
-        "OME-Arrow chunks zstd, rows, open": "OA DS\nrows",
-        "OME-Arrow chunks none, NumPy, open": "OA DS\nnone",
+        "OME-Arrow chunks zstd, NumPy, reopen": "OA Dataset\nzstd\nreopen each call",
+        "OME-Arrow chunks zstd, NumPy, open": "OA Dataset\nzstd\nkeep handle open",
+        "OME-Arrow chunks zstd, rows, open": "OA Dataset\nzstd\nchunk-row API",
+        "OME-Arrow chunks none, NumPy, open": "OA Dataset\nuncompressed\nkeep handle open",
     }
     diagnostic_summary = (
         format_summary.set_index("format").loc[diagnostic_formats].reset_index()
@@ -1581,9 +1590,11 @@ def plot_format_diagnostics(format_summary: pd.DataFrame) -> None:
         metrics,
         color_map,
         label_map,
-        "OME-IRIS NF1 OA DS diagnostic variants",
+        # Title states the observation rather than describing the chart contents.
+        "OME-Arrow Dataset: keeping the handle open reduces read latency;\n"
+        "skipping compression cuts read time further at the cost of disk space",
         FIGURES_DIR / "compare_ome_iris_joins_diagnostics.png",
-        key_extra=("reopen: fresh handle\nrows: raw chunk rows\nnone: uncompressed"),
+        legend_ncol=2,
     )
 
 
@@ -1595,6 +1606,8 @@ def _plot_format_bars(
     title: str,
     output_path: Path,
     key_extra: str | None = None,
+    legend_right: bool = False,
+    legend_ncol: int | None = None,
 ) -> None:
     colors = [color_map.get(name, "#BAB0AC") for name in format_summary["format"]]
     labels = [label_map.get(name, name) for name in format_summary["format"]]
@@ -1603,11 +1616,11 @@ def _plot_format_bars(
     plt.rcParams.update({"font.size": 12})
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle(title)
-    for ax, (col, title, ylabel) in zip(axes.flat, metrics):
+    for ax, (col, ax_title, ylabel) in zip(axes.flat, metrics):
         bars = ax.bar(x, format_summary[col], color=colors)
-        ax.set_title(title)
+        ax.set_title(ax_title)
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=0, ha="center")
+        ax.set_xticklabels(labels, rotation=0, ha="center", fontsize=8)
         ax.set_ylabel(ylabel)
         ax.grid(axis="y", linestyle=":", alpha=0.5)
         label_vertical_bars(ax, bars)
@@ -1616,9 +1629,24 @@ def _plot_format_bars(
         (label_map.get(name, name).replace("\n", " "), color_map.get(name, "#BAB0AC"))
         for name in format_summary["format"]
     ]
-    add_colored_figure_key(fig, legend_items, extra=key_extra)
-    fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
-    fig.tight_layout(rect=(0, 0.24, 1, 0.94))
+    if legend_right:
+        legend_title = OA_KEY_TEXT + (f"\n{key_extra}" if key_extra else "")
+        handles = [Patch(facecolor=color, label=label) for label, color in legend_items]
+        fig.legend(
+            handles=handles,
+            loc="center right",
+            bbox_to_anchor=(1.0, 0.5),
+            frameon=True,
+            fontsize=9,
+            title=legend_title,
+            title_fontsize=8,
+        )
+        fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
+        fig.tight_layout(rect=(0, 0.03, 0.78, 0.92))
+    else:
+        add_colored_figure_key(fig, legend_items, extra=key_extra, ncol=legend_ncol)
+        fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
+        fig.tight_layout(rect=(0, 0.24, 1, 0.94))
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
 
@@ -1627,6 +1655,7 @@ def add_colored_figure_key(
     fig,
     items: list[tuple[str, str]],
     extra: str | None = None,
+    ncol: int | None = None,
 ) -> None:
     title = OA_KEY_TEXT
     if extra:
@@ -1636,10 +1665,11 @@ def add_colored_figure_key(
         handles=handles,
         loc="lower center",
         bbox_to_anchor=(0.5, 0.045),
-        ncol=min(4, len(items)),
+        ncol=ncol if ncol is not None else min(4, len(items)),
         title=title,
         frameon=True,
     )
+
 
 
 def plot_3d_results(summary_3d: pd.DataFrame) -> None:

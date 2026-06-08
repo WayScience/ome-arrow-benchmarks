@@ -39,7 +39,7 @@ OME_ARROW_VERSION = importlib_metadata.version("ome-arrow")
 BENCHMARK_VERSION = f"ome_iris_leaf_compression_v1:{OME_ARROW_VERSION}"
 TIMING_REPEATS = 5
 RANDOM_IMAGE_COUNT = 3
-SOURCE_NOTE = "Datasets: OME-IRIS catalog entries backed by cytomining/CytoDataFrame test data (CC-BY-4.0)."
+SOURCE_NOTE = "Datasets: OME-IRIS catalog entries."
 
 FIGURES_DIR.mkdir(exist_ok=True)
 BENCH_DIR.mkdir(parents=True, exist_ok=True)
@@ -338,22 +338,21 @@ def run_benchmarks() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def label_bars(ax, bars) -> None:
+    axis_top = ax.get_ylim()[1]
     for bar in bars:
         value = bar.get_height()
         if value <= 0:
             continue
-        axis_top = ax.get_ylim()[1] or value
-        inset = max(axis_top * 0.025, value * 0.10)
-        text_y = max(value - inset, axis_top * 0.015)
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            text_y,
+            value + axis_top * 0.01,
             f"{value:.3g}",
             ha="center",
-            va="top",
-            color="white",
-            fontsize=7,
+            va="bottom",
+            color="black",
+            fontsize=8,
             rotation=90,
+            clip_on=False,
         )
 
 
@@ -366,10 +365,10 @@ def plot_results(summary: pd.DataFrame) -> None:
         ("size_mb", "Size (MB)"),
     ]
     dataset_labels = {
-        "CP_tutorial_3D_noise_nuclei_segmentation": "CP 3D",
+        "CP_tutorial_3D_noise_nuclei_segmentation": "CP Tutorial 3D",
         "JUMP_plate_BR00117006": "JUMP",
         "NF1_cellpainting_data_shrunken": "NF1",
-        "pediatric_cancer_atlas_profiling": "Ped atlas",
+        "pediatric_cancer_atlas_profiling": "Ped Atlas",
     }
     labels = [cfg["label"] for cfg in COMPRESSION_CONFIGS]
     colors = {
@@ -394,10 +393,17 @@ def plot_results(summary: pd.DataFrame) -> None:
     x = np.arange(len(datasets))
     width = 0.10
 
-    plt.rcParams.update({"font.size": 9})
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10.5))
-    fig.suptitle("OME-IRIS OME-Arrow nested table leaf compression sweep")
-    for ax, (metric, title) in zip(axes.ravel(), metrics):
+    plt.rcParams.update({"font.size": 18})
+    fig, axes = plt.subplots(len(metrics), 1, figsize=(11, 5 * len(metrics)))
+    # All panels share the same subject: each compares the same 7 compression
+    # configurations (bar colors) across the same 4 OME-IRIS datasets (x-axis groups).
+    # The panels differ only in what is being measured on the y-axis.
+    fig.suptitle(
+        "OME-Arrow chunk-level and Parquet container compression benchmark\n"
+        "7 configurations (bar colors) × 4 OME-IRIS datasets (x-axis groups)",
+        fontsize=16,
+    )
+    for ax, (metric, title) in zip(axes, metrics):
         y_max = 0.0
         for offset, label in enumerate(labels):
             values = []
@@ -417,23 +423,27 @@ def plot_results(summary: pd.DataFrame) -> None:
             if y_max > 0:
                 ax.set_ylim(0, y_max * 1.18)
             label_bars(ax, bars)
-        ax.set_title(title)
+        ax.set_title(title, fontsize=18)
         ax.set_xticks(x)
-        ax.set_xticklabels([dataset_labels.get(name, name) for name in datasets])
+        ax.set_xticklabels(
+            [dataset_labels.get(name, name) for name in datasets], fontsize=16
+        )
+        ax.tick_params(axis="y", labelsize=15)
         ax.grid(axis="y", linestyle=":", alpha=0.5)
-    axes.ravel()[-1].axis("off")
-    handles, labels_out = axes.ravel()[0].get_legend_handles_labels()
+    handles, labels_out = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
         labels_out,
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.035),
+        bbox_to_anchor=(0.5, 0.01),
         ncol=len(labels),
+        fontsize=15,
         title="PQ = Parquet container compression; leaf = OME-Arrow chunk byte compression",
+        title_fontsize=14,
     )
-    fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
-    fig.tight_layout(rect=(0, 0.13, 1, 0.95))
-    fig.savefig(PLOT_PATH, dpi=150)
+    fig.text(0.5, 0.0, SOURCE_NOTE, ha="center", fontsize=13)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
+    fig.savefig(PLOT_PATH, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 

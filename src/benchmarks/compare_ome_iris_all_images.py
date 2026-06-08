@@ -49,7 +49,7 @@ OA_KEY_TEXT = (
     "OA NT = OME-Arrow nested table; OA DS = OMEArrowDataset; "
     "Parquet/Vortex/Lance = table backend"
 )
-SOURCE_NOTE = "Datasets: OME-IRIS catalog entries backed by cytomining/CytoDataFrame test data (CC-BY-4.0)."
+SOURCE_NOTE = "Datasets: OME-IRIS catalog entries."
 
 FIGURES_DIR.mkdir(exist_ok=True)
 BENCH_DIR.mkdir(parents=True, exist_ok=True)
@@ -263,7 +263,7 @@ def benchmark_dataset(dataset_dir: Path, image_paths: list[Path]):
             "read": lambda: read_zarr_images(zarr_path),
         },
         {
-            "method": "TIFF source",
+            "method": "TIFF",
             "path": None,
             "write": None,
             "read": lambda: read_tiff_images(image_paths),
@@ -354,22 +354,27 @@ def label_bars(ax, bars) -> None:
         return
     y_max = max(values)
     min_labeled_value = y_max * 0.04
+    ax.set_ylim(0, y_max * 1.25)
     for bar, value in zip(bars, values):
         if value <= 0 or value < min_labeled_value:
             continue
-        inset = max(value * 0.08, y_max * 0.015)
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            value - inset,
+            value + y_max * 0.01,
             f"{value:.3f}" if value < 1 else f"{value:.2f}",
             ha="center",
-            va="top",
-            color="white",
-            fontsize=6,
+            va="bottom",
+            color="black",
+            fontsize=9,
+            rotation=90,
         )
 
 
 def plot_results(summary: pd.DataFrame) -> None:
+    # Normalise the legacy "TIFF source" label that may exist in cached data.
+    summary = summary.copy()
+    summary["method"] = summary["method"].replace("TIFF source", "TIFF")
+
     metrics = [
         ("write_avg_s", "Write all avg (s)"),
         ("read_all_avg_s", "Read all avg (s)"),
@@ -381,13 +386,14 @@ def plot_results(summary: pd.DataFrame) -> None:
         "OA NT Lance",
         "OA DS Parquet",
         "Zarr",
-        "TIFF source",
+        "TIFF",
     ]
     dataset_labels = {
-        "CP_tutorial_3D_noise_nuclei_segmentation": "CP 3D",
+        # CellProfiler tutorial dataset with 3-D nuclei segmentation noise images.
+        "CP_tutorial_3D_noise_nuclei_segmentation": "CP Tutorial 3D",
         "JUMP_plate_BR00117006": "JUMP",
         "NF1_cellpainting_data_shrunken": "NF1",
-        "pediatric_cancer_atlas_profiling": "Ped atlas",
+        "pediatric_cancer_atlas_profiling": "Ped Atlas",
     }
     colors = {
         "OA NT Parquet": "#6F4E37",
@@ -395,7 +401,7 @@ def plot_results(summary: pd.DataFrame) -> None:
         "OA NT Lance": "#8A5A9E",
         "OA DS Parquet": "#3D7FBF",
         "Zarr": "#6B7280",
-        "TIFF source": "#C86A1B",
+        "TIFF": "#C86A1B",
     }
     method_labels = {
         "OA NT Parquet": "OA NT Parquet",
@@ -403,15 +409,15 @@ def plot_results(summary: pd.DataFrame) -> None:
         "OA NT Lance": "OA NT Lance",
         "OA DS Parquet": "OA DS Parquet",
         "Zarr": "OME-Zarr",
-        "TIFF source": "TIFF source",
+        "TIFF": "TIFF",
     }
     datasets = list(dict.fromkeys(summary["dataset"]))
     x = np.arange(len(datasets))
     width = 0.12
 
-    plt.rcParams.update({"font.size": 10})
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.4))
-    fig.suptitle("OME-IRIS all-dataset image payload benchmark")
+    plt.rcParams.update({"font.size": 13})
+    fig, axes = plt.subplots(3, 1, figsize=(10, 15))
+    fig.suptitle("OME-IRIS all-dataset image payload benchmark", fontsize=15)
     for ax, (metric, title) in zip(axes, metrics):
         y_max = 0.0
         for offset, method in enumerate(methods):
@@ -430,24 +436,30 @@ def plot_results(summary: pd.DataFrame) -> None:
                 color=colors[method],
             )
             label_bars(ax, bars)
-        ax.set_title(title)
+        ax.set_title(title, fontsize=13)
         if y_max > 0:
             ax.set_ylim(0, y_max * 1.18)
         ax.set_xticks(x)
-        ax.set_xticklabels([dataset_labels.get(name, name) for name in datasets])
+        ax.set_xticklabels(
+            [dataset_labels.get(name, name) for name in datasets], fontsize=12
+        )
+        ax.tick_params(axis="y", labelsize=11)
         ax.grid(axis="y", linestyle=":", alpha=0.5)
+
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.035),
-        ncol=len(methods),
+        bbox_to_anchor=(0.5, 0.16),
+        ncol=2,
+        fontsize=11,
         title=OA_KEY_TEXT,
+        title_fontsize=9,
     )
-    fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
-    fig.tight_layout(rect=(0, 0.20, 1, 0.93))
-    fig.savefig(PLOT_PATH, dpi=150)
+    fig.text(0.5, 0.11, SOURCE_NOTE, ha="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0.25, 1, 0.97))
+    fig.savefig(PLOT_PATH, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
