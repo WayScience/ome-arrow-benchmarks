@@ -23,7 +23,8 @@ dependencies = [
   "matplotlib>=3.10.9",
   "numcodecs>=0.16.5",
   "numpy>=2.4.6",
-  "ome-arrow>=0.0.9",
+  "ome-arrow>=0.0.10",
+  "ome-iris>=0.0.4",
   "ome-zarr>=0.16",
   "pandas>=3.0.3",
   "poethepoet>=0.46",
@@ -52,6 +53,7 @@ paths = [ "src/benchmarks" ]
 tasks.lab.shell = "uv venv && uv sync && uv run jupyter lab"
 tasks.run-benchmarks.shell = """\
   uv run python src/benchmarks/compare_parquet_vortex_lance.py && uv run python \
-  src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py\
+  src/benchmarks/compare_parquet_vortex_lance_ome.py && uv run python src/benchmarks/compare_ome_arrow_only.py && uv \
+  run python src/benchmarks/compare_ome_iris_joins.py\
   """
 tasks.setup.shell = "uv venv && uv sync"

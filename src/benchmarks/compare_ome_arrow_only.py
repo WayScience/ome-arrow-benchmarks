@@ -1,4 +1,4 @@
-"""OME-Arrow single-column benchmarks
+"""OME image-column storage benchmarks
 
 Compare on-disk formats for a table containing only `row_id` and one OME-Arrow
 image column, plus a separate benchmark for a directory-per-image OME-Zarr
@@ -33,11 +33,11 @@ import vortex.io as vxio
 from ome_arrow import OMEArrow
 
 pd.set_option("display.precision", 4)
-PLOT_TITLE = f"{(__doc__ or 'OME-Arrow single-column benchmarks').splitlines()[0]} (lower is better)"
+PLOT_TITLE = "One OME-Arrow Image Column: Table Backends vs Directory Baselines\n(lower is better)"
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
-IMAGES_DIR = Path("images")
-IMAGES_DIR.mkdir(exist_ok=True)
+FIGURES_DIR = Path("figures")
+FIGURES_DIR.mkdir(exist_ok=True)
 SUMMARY_PARQUET = DATA_DIR / "compare_ome_arrow_only_summary.parquet"
 RUNS_PARQUET = DATA_DIR / "compare_ome_arrow_only_runs.parquet"
 RUN_BENCHMARKS = not (SUMMARY_PARQUET.exists() and RUNS_PARQUET.exists())
@@ -623,6 +623,15 @@ COLOR_MAP = {
     "OME-Zarr (dir-per-image)": "#7A5A3C",
 }
 colors = [COLOR_MAP.get(name, "#BAB0AC") for name in summary["format"]]
+DISPLAY_LABELS = {
+    "Parquet (pyarrow, zstd)": "PQ\npyarrow",
+    "Parquet (duckdb, zstd)": "PQ\nduckdb",
+    "Lance (lancedb)": "Lance",
+    "Vortex": "Vortex",
+    "DuckDB (file table)": "DuckDB",
+    "TIFF (dir-per-image)": "TIFF",
+    "OME-Zarr (dir-per-image)": "OME-Zarr",
+}
 
 
 def label_bars(ax, bars, fmt="%.3f"):
@@ -662,7 +671,7 @@ for ax, (col, title) in zip(axes.flat, metrics):
     bars = ax.bar(x, summary[col], color=colors)
     ax.set_title(title)
     ax.set_xticks(x)
-    ax.set_xticklabels(summary["format"], rotation=30, ha="right")
+    ax.set_xticklabels([DISPLAY_LABELS.get(name, name) for name in summary["format"]])
     ax.grid(axis="y", linestyle=":", alpha=0.5)
     if col != "size_mb":
         ax.set_ylabel("seconds")
@@ -670,5 +679,5 @@ for ax, (col, title) in zip(axes.flat, metrics):
         ax.set_ylabel("MB")
     label_bars(ax, bars)
 
-fig.savefig(IMAGES_DIR / "compare_ome_arrow_only_summary.png", dpi=150)
+fig.savefig(FIGURES_DIR / "compare_ome_arrow_only_summary.png", dpi=150)
 plt.close(fig)

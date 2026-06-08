@@ -790,6 +790,7 @@ dependencies = [
     { name = "numcodecs" },
     { name = "numpy" },
     { name = "ome-arrow" },
+    { name = "ome-iris" },
     { name = "ome-zarr" },
     { name = "pandas" },
     { name = "poethepoet" },
@@ -813,18 +814,19 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "numcodecs", specifier = ">=0.16.5" },
     { name = "numpy", specifier = ">=2.4.6" },
-    { name = "ome-arrow", specifier = ">=0.0.9" },
-    { name = "ome-zarr", specifier = ">=0.16.0" },
+    { name = "ome-arrow", specifier = ">=0.0.10" },
+    { name = "ome-iris", specifier = ">=0.0.4" },
+    { name = "ome-zarr", specifier = ">=0.16" },
     { name = "pandas", specifier = ">=3.0.3" },
-    { name = "poethepoet", specifier = ">=0.46.0" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "poethepoet", specifier = ">=0.46" },
+    { name = "pyarrow", specifier = ">=24" },
     { name = "tifffile", specifier = ">=2026.3.3" },
-    { name = "vortex-data", specifier = ">=0.73.0" },
+    { name = "vortex-data", specifier = ">=0.73" },
     { name = "zarr", specifier = ">=3.1.6" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "poethepoet", specifier = ">=0.46.0" }]
+dev = [{ name = "poethepoet", specifier = ">=0.46" }]
 
 [[package]]
 name = "deprecated"
@@ -2469,7 +2471,7 @@ wheels = [
 
 [[package]]
 name = "ome-arrow"
-version = "0.0.9"
+version = "0.0.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bioio" },
@@ -2483,9 +2485,23 @@ dependencies = [
     { name = "pillow" },
     { name = "pyarrow" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/ec/45f743b251254a1a06952802fbc3cab849254d4a51d05c73f90f2bc7d37a/ome_arrow-0.0.9.tar.gz", hash = "sha256:9dc680fd123b041aea77d6c2742f37cb94f1314333cb4475ff99ba266ce38960", size = 35947375, upload-time = "2026-04-08T20:28:56.243Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/98/d431efc49eb73afbbf348b06223b89d52a485b492229eab0575ace18f178/ome_arrow-0.0.10.tar.gz", hash = "sha256:df9cb129751c89ddca24d29049e4a45858316cdfd9c972624c37ed6deee33926", size = 45479538, upload-time = "2026-06-07T04:37:07.643Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/46/45cac4380e01441d9dc37583626c33ada31b0ec4a9efc75339379f2f635e/ome_arrow-0.0.9-py3-none-any.whl", hash = "sha256:20a51fd41a30aebbe70b0423bf00994e22b9c534ba602ec4d2c15f0f9790a66d", size = 59298, upload-time = "2026-04-08T20:28:54.34Z" },
+    { url = "https://files.pythonhosted.org/packages/89/78/2b47112dad63df9e3a46d4cd011ea45f40288245666271b7f832a8393285/ome_arrow-0.0.10-py3-none-any.whl", hash = "sha256:744c74b96004c258c19e46dbe59cff28653510277f27fc667c16ee664f2d3314", size = 73205, upload-time = "2026-06-07T04:37:05.656Z" },
+]
+
+[[package]]
+name = "ome-iris"
+version = "0.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pandas" },
+    { name = "pillow" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7a/6e/915de25ae32a901a12f689de9cb90d8bae5b19690e6269689224e8c02cef/ome_iris-0.0.4.tar.gz", hash = "sha256:d88bc96a5078d984710a340799121f21a15b812a15cce896cc42f81b5a22c775", size = 109378, upload-time = "2026-05-30T21:52:11.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/fb/819382e372bbada824b5566b29fb4cba54f4d000aede3ff8cd90d8573340/ome_iris-0.0.4-py3-none-any.whl", hash = "sha256:3082a93887eeba2324c02a44cdbd84d56fa4d18b8ea8a340292da31ef412d01f", size = 20304, upload-time = "2026-05-30T21:52:10.491Z" },
 ]
 
 [[package]]
