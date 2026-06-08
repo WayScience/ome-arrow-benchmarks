@@ -38,10 +38,10 @@ from OME_IRIS.fetch import fetch_datasets
 DATA_DIR = Path("data")
 OME_IRIS_DATA_DIR = DATA_DIR / "ome_iris_all"
 BENCH_DIR = DATA_DIR / "ome_iris_all_images_benchmark"
-IMAGES_DIR = Path("images")
+FIGURES_DIR = Path("figures")
 SUMMARY_PARQUET = DATA_DIR / "compare_ome_iris_all_images_summary.parquet"
 RUNS_PARQUET = DATA_DIR / "compare_ome_iris_all_images_runs.parquet"
-PLOT_PATH = IMAGES_DIR / "compare_ome_iris_all_images_summary.png"
+PLOT_PATH = FIGURES_DIR / "compare_ome_iris_all_images_summary.png"
 OME_ARROW_VERSION = importlib_metadata.version("ome-arrow")
 BENCHMARK_VERSION = f"ome_iris_all_images_v3:{OME_ARROW_VERSION}"
 TIMING_REPEATS = 5
@@ -51,7 +51,7 @@ OA_KEY_TEXT = (
 )
 SOURCE_NOTE = "Datasets: OME-IRIS catalog entries backed by cytomining/CytoDataFrame test data (CC-BY-4.0)."
 
-IMAGES_DIR.mkdir(exist_ok=True)
+FIGURES_DIR.mkdir(exist_ok=True)
 BENCH_DIR.mkdir(parents=True, exist_ok=True)
 
 

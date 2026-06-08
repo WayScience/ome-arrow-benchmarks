@@ -31,17 +31,17 @@ from OME_IRIS.fetch import fetch_datasets
 DATA_DIR = Path("data")
 OME_IRIS_DATA_DIR = DATA_DIR / "ome_iris_leaf_compression"
 BENCH_DIR = DATA_DIR / "ome_iris_leaf_compression_benchmark"
-IMAGES_DIR = Path("images")
+FIGURES_DIR = Path("figures")
 SUMMARY_PARQUET = DATA_DIR / "compare_ome_iris_leaf_compression_summary.parquet"
 RUNS_PARQUET = DATA_DIR / "compare_ome_iris_leaf_compression_runs.parquet"
-PLOT_PATH = IMAGES_DIR / "compare_ome_iris_leaf_compression_summary.png"
+PLOT_PATH = FIGURES_DIR / "compare_ome_iris_leaf_compression_summary.png"
 OME_ARROW_VERSION = importlib_metadata.version("ome-arrow")
 BENCHMARK_VERSION = f"ome_iris_leaf_compression_v1:{OME_ARROW_VERSION}"
 TIMING_REPEATS = 5
 RANDOM_IMAGE_COUNT = 3
 SOURCE_NOTE = "Datasets: OME-IRIS catalog entries backed by cytomining/CytoDataFrame test data (CC-BY-4.0)."
 
-IMAGES_DIR.mkdir(exist_ok=True)
+FIGURES_DIR.mkdir(exist_ok=True)
 BENCH_DIR.mkdir(parents=True, exist_ok=True)
 
 

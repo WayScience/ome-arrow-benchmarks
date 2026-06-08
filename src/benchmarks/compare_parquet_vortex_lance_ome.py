@@ -31,8 +31,8 @@ pd.set_option("display.precision", 4)
 PLOT_TITLE = f"{(__doc__ or 'Parquet vs. Vortex vs. Lance performance (with OME-Arrow)').splitlines()[0]} (lower is better)"
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
-IMAGES_DIR = Path("images")
-IMAGES_DIR.mkdir(exist_ok=True)
+FIGURES_DIR = Path("figures")
+FIGURES_DIR.mkdir(exist_ok=True)
 SUMMARY_PARQUET = DATA_DIR / "compare_parquet_vortex_lance_ome_summary.parquet"
 RUNS_PARQUET = DATA_DIR / "compare_parquet_vortex_lance_ome_runs.parquet"
 RUN_BENCHMARKS = not (SUMMARY_PARQUET.exists() and RUNS_PARQUET.exists())
@@ -502,5 +502,5 @@ for ax, (col, title) in zip(axes.flat, metrics):
         ax.set_ylabel("MB")
     label_bars(ax, bars)
 
-fig.savefig(IMAGES_DIR / "compare_parquet_vortex_lance_ome_summary.png", dpi=150)
+fig.savefig(FIGURES_DIR / "compare_parquet_vortex_lance_ome_summary.png", dpi=150)
 plt.close(fig)

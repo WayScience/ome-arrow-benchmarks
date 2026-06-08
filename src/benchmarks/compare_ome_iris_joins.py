@@ -7,7 +7,7 @@ cases represent the common current pattern: feature/profile Parquet joined to
 image metadata/path Parquet with DuckDB. The converted image cases use the same
 images represented in OME-Arrow, OME-TIFF, or OME-Zarr.
 
-Artifacts are written under `data/` and plots under `images/`.
+Artifacts are written under `data/` and plots under `figures/`.
 """
 
 from __future__ import annotations
@@ -49,8 +49,8 @@ DATA_DIR = Path("data")
 OME_IRIS_DATA_DIR = DATA_DIR / "ome_iris"
 BENCH_DIR = DATA_DIR / "ome_iris_join_benchmark"
 BENCH_3D_DIR = DATA_DIR / "ome_iris_3d_benchmark"
-IMAGES_DIR = Path("images")
-IMAGES_DIR.mkdir(exist_ok=True)
+FIGURES_DIR = Path("figures")
+FIGURES_DIR.mkdir(exist_ok=True)
 BENCH_DIR.mkdir(parents=True, exist_ok=True)
 BENCH_3D_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1450,7 +1450,7 @@ def plot_results(summary_df: pd.DataFrame, table_summary: pd.DataFrame) -> None:
 
     fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
     fig.tight_layout(rect=(0, 0.19, 1, 0.94))
-    fig.savefig(IMAGES_DIR / "compare_ome_iris_joins_detail.png", dpi=150)
+    fig.savefig(FIGURES_DIR / "compare_ome_iris_joins_detail.png", dpi=150)
     plt.close(fig)
 
 
@@ -1544,7 +1544,7 @@ def plot_format_results(format_summary: pd.DataFrame) -> None:
         color_map,
         label_map,
         "OME-IRIS NF1 converted image formats",
-        IMAGES_DIR / "compare_ome_iris_joins_summary.png",
+        FIGURES_DIR / "compare_ome_iris_joins_summary.png",
     )
 
 
@@ -1582,7 +1582,7 @@ def plot_format_diagnostics(format_summary: pd.DataFrame) -> None:
         color_map,
         label_map,
         "OME-IRIS NF1 OA DS diagnostic variants",
-        IMAGES_DIR / "compare_ome_iris_joins_diagnostics.png",
+        FIGURES_DIR / "compare_ome_iris_joins_diagnostics.png",
         key_extra=("reopen: fresh handle\nrows: raw chunk rows\nnone: uncompressed"),
     )
 
@@ -1645,10 +1645,10 @@ def add_colored_figure_key(
 def plot_3d_results(summary_3d: pd.DataFrame) -> None:
     metrics = [
         ("write_avg_s", "Write all avg (s)", "seconds"),
-        ("read_all_avg_s", "Read all avg (s)", "seconds"),
-        ("read_plane_avg_s", "Read plane avg (s)", "seconds"),
-        ("read_subvolume_avg_s", "Read subvolume avg (s)", "seconds"),
-        ("size_mb", "Size (MB)", "MB"),
+        ("read_all_avg_s", "Read all volumes avg (s)", "seconds"),
+        ("read_plane_avg_s", "Read one z-plane avg (s)", "seconds"),
+        ("read_subvolume_avg_s", "Read 16x128x128 region avg (s)", "seconds"),
+        ("size_mb", "On-disk size (MB)", "MB"),
     ]
     color_map = {
         "OME-Arrow 3D z-plane": "#2E7D4F",
@@ -1659,20 +1659,24 @@ def plot_3d_results(summary_3d: pd.DataFrame) -> None:
         "TIFF 3D source": "#C86A1B",
     }
     label_map = {
-        "OME-Arrow 3D z-plane": "OA\nz-plane",
+        "OME-Arrow 3D z-plane": "OA\nplane",
         "OME-Arrow 3D block": "OA\nblock",
-        "OME-Arrow 3D block none": "OA\nnone",
+        "OME-Arrow 3D block none": "OA\nraw",
         "Zarr 3D whole chunks": "OME-\nZarr\nwhole",
         "Zarr 3D block chunks": "OME-\nZarr\nblock",
-        "TIFF 3D source": "TIFF",
+        "TIFF 3D source": "TIFF\nsource",
     }
     colors = [color_map.get(name, "#BAB0AC") for name in summary_3d["format"]]
     labels = [label_map.get(name, name) for name in summary_3d["format"]]
     x = np.arange(len(summary_3d))
+    image_count = int(summary_3d["image_count"].iloc[0])
+    shape = str(summary_3d["shape"].iloc[0]).replace("TCZYX=", "TCZYX ")
 
     plt.rcParams.update({"font.size": 11})
-    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
-    fig.suptitle("OME-IRIS nuclei-3d payload access")
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    fig.suptitle(
+        f"3D nuclei segmentation benchmark: {image_count} source TIFF volumes, {shape}"
+    )
     for ax, (col, title, ylabel) in zip(axes.flat, metrics):
         bars = ax.bar(x, summary_3d[col], color=colors)
         ax.set_title(title)
@@ -1681,11 +1685,68 @@ def plot_3d_results(summary_3d: pd.DataFrame) -> None:
         ax.set_ylabel(ylabel)
         ax.grid(axis="y", linestyle=":", alpha=0.5)
         label_vertical_bars(ax, bars)
+        if col == "write_avg_s":
+            tiff_rows = np.flatnonzero(
+                summary_3d["format"].to_numpy() == "TIFF 3D source"
+            )
+            if len(tiff_rows):
+                y_max = max(summary_3d[col].max(), 0.001)
+                ax.text(
+                    tiff_rows[0],
+                    y_max * 0.05,
+                    "source\nnot\nrewritten",
+                    ha="center",
+                    va="bottom",
+                    color="#333333",
+                    fontsize=8,
+                )
 
     axes.flat[-1].axis("off")
-    fig.text(0.5, 0.01, SOURCE_NOTE, ha="center", fontsize=8)
-    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
-    fig.savefig(IMAGES_DIR / "compare_ome_iris_3d_summary.png", dpi=150)
+    legend_items = [
+        (
+            "OA plane = OME-Arrow z-plane chunks, Zstd",
+            color_map["OME-Arrow 3D z-plane"],
+        ),
+        (
+            "OA block = OME-Arrow 16x128x128 chunks, Zstd",
+            color_map["OME-Arrow 3D block"],
+        ),
+        (
+            "OA raw = OME-Arrow 16x128x128 chunks, uncompressed",
+            color_map["OME-Arrow 3D block none"],
+        ),
+        (
+            "OME-Zarr whole = one chunk per volume",
+            color_map["Zarr 3D whole chunks"],
+        ),
+        (
+            "OME-Zarr block = 16x128x128 chunks",
+            color_map["Zarr 3D block chunks"],
+        ),
+        (
+            "TIFF source = original source files, write not measured",
+            color_map["TIFF 3D source"],
+        ),
+    ]
+    handles = [Patch(facecolor=color, label=label) for label, color in legend_items]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.06),
+        ncol=2,
+        frameon=True,
+        fontsize=9,
+    )
+    fig.text(
+        0.5,
+        0.02,
+        "A z-plane is one Z slice. The region read is z=10:26, y=64:192, x=64:192 from one volume. "
+        + SOURCE_NOTE,
+        ha="center",
+        fontsize=8,
+    )
+    fig.tight_layout(rect=(0, 0.22, 1, 0.94))
+    fig.savefig(FIGURES_DIR / "compare_ome_iris_3d_summary.png", dpi=150)
     plt.close(fig)
 
 

@@ -10,46 +10,44 @@ Benchmarking [OME Arrow](https://github.com/WayScience/ome-arrow) through Parque
 
 Wide-table benchmark results for the generic storage backends.
 
-![Parquet, Vortex, and Lance benchmark](images/compare_parquet_vortex_lance_summary.png)
+![Parquet, Vortex, and Lance benchmark](figures/compare_parquet_vortex_lance_summary.png)
 
-The OME-Arrow variant adds a single OME image column to the same wide-table
-benchmark shape.
+The OME-Arrow variant adds a single OME image column to the same wide-table benchmark shape.
 
-![Parquet, Vortex, and Lance benchmark with OME-Arrow](images/compare_parquet_vortex_lance_ome_summary.png)
+![Parquet, Vortex, and Lance benchmark with OME-Arrow](figures/compare_parquet_vortex_lance_ome_summary.png)
 
 ### OME-Arrow and OME-Zarr
 
-Smaller OME-Arrow-only benchmark focused on a single OME image column and a
-directory-per-image OME-Zarr comparison.
+Smaller OME-Arrow-only benchmark focused on table formats that store one OME image column, with directory-per-image TIFF and OME-Zarr baselines.
 
-![OME-Arrow-only benchmark](images/compare_ome_arrow_only_summary.png)
+![OME-Arrow image-column benchmark](figures/compare_ome_arrow_only_summary.png)
 
 ### Real image validation plots
 
-These plots are a broader validation suite over real image bundles. They are
-useful after inspecting the smaller benchmark outputs above.
+These plots are a broader validation suite over real image bundles.
+They are useful after inspecting the smaller benchmark outputs above.
 
 NF1 Cell Painting write-all, read-all, read-random, and size comparisons:
 
-![OME-IRIS NF1 converted image format benchmark](images/compare_ome_iris_joins_summary.png)
+![OME-IRIS NF1 converted image format benchmark](figures/compare_ome_iris_joins_summary.png)
 
 Nested-table leaf byte compression compared with Parquet container compression:
 
-![OME-IRIS leaf compression sweep](images/compare_ome_iris_leaf_compression_summary.png)
+![OME-IRIS leaf compression sweep](figures/compare_ome_iris_leaf_compression_summary.png)
 
 All local OME-IRIS image bundles:
 
-![OME-IRIS all-image benchmark](images/compare_ome_iris_all_images_summary.png)
+![OME-IRIS all-image benchmark](figures/compare_ome_iris_all_images_summary.png)
 
-3D nuclei access patterns:
+3D nuclei segmentation volumes, including full-volume, z-plane, and 16x128x128 region reads:
 
-![OME-IRIS nuclei-3d benchmark](images/compare_ome_iris_3d_summary.png)
+![OME-IRIS nuclei-3d benchmark](figures/compare_ome_iris_3d_summary.png)
 
 Join detail and OA DS diagnostics:
 
-![OME-IRIS join detail benchmark](images/compare_ome_iris_joins_detail.png)
+![OME-IRIS join detail benchmark](figures/compare_ome_iris_joins_detail.png)
 
-![OME-IRIS OA DS diagnostic variants](images/compare_ome_iris_joins_diagnostics.png)
+![OME-IRIS OA DS diagnostic variants](figures/compare_ome_iris_joins_diagnostics.png)
 
 ## Running benchmarks
 
@@ -70,14 +68,12 @@ The benchmarks defaults to ~100,000 rows x ~4,000 columns of `float64` data and 
 
 An OME-Arrow variant lives at `notebooks/compare_parquet_vortex_lance_ome.py` which adds a single OME image column (random 100x100) alongside the existing columns.
 
-An OME-Arrow-only + OME-Zarr benchmark lives at `notebooks/compare_ome_arrow_only.pyt`, focusing on a single OME image column and a directory-per-image OME-Zarr comparison.
+An OME-Arrow-only + OME-Zarr benchmark lives at `src/benchmarks/compare_ome_arrow_only.py`, focusing on table formats that store one OME image column plus directory-per-image TIFF and OME-Zarr comparisons.
 
 ## Additional validation benchmarks
 
-These benchmark scripts provide broader coverage over real image bundles and are
-useful for validating results beyond the smaller synthetic and single-image
-benchmarks. They are intentionally listed last because they are a larger
-validation suite rather than the baseline benchmark entry point.
+These benchmark scripts provide broader coverage over real image bundles and are useful for validating results beyond the smaller synthetic and single-image benchmarks.
+They are intentionally listed last because they are a larger validation suite rather than the baseline benchmark entry point.
 
 Run the main OME-IRIS comparison with:
 
@@ -87,19 +83,14 @@ uv run python src/benchmarks/compare_ome_iris_joins.py
 
 The real-image benchmark scripts are:
 
-- `src/benchmarks/compare_ome_iris_joins.py`: NF1 joins, converted image
-  formats, and 3D nuclei access.
-- `src/benchmarks/compare_ome_iris_all_images.py`: all image bundles in the
-  local OME-IRIS catalog.
-- `src/benchmarks/compare_ome_iris_leaf_compression.py`: nested-table leaf byte
-  compression sweep.
+- `src/benchmarks/compare_ome_iris_joins.py`: NF1 joins, converted image formats, and 3D nuclei access.
+- `src/benchmarks/compare_ome_iris_all_images.py`: all image bundles in the local OME-IRIS catalog.
+- `src/benchmarks/compare_ome_iris_leaf_compression.py`: nested-table leaf byte compression sweep.
 
 ### Dataset sources
 
-The OME-IRIS benchmark scripts fetch datasets from the installed `ome-iris`
-catalog manifests. Those manifests currently point to
-[`cytomining/CytoDataFrame`](https://github.com/cytomining/CytoDataFrame) test
-data and declare `CC-BY-4.0` licensing.
+The OME-IRIS benchmark scripts fetch datasets from the installed `ome-iris` catalog manifests.
+Those manifests currently point to [`cytomining/CytoDataFrame`](https://github.com/cytomining/CytoDataFrame) test data and declare `CC-BY-4.0` licensing.
 
 | OME-IRIS dataset ID         | Local source identifier                    | Upstream source                                                                                                                                               |
 | --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
