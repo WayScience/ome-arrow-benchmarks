@@ -400,7 +400,8 @@ def plot_results(summary: pd.DataFrame) -> None:
     # The panels differ only in what is being measured on the y-axis.
     fig.suptitle(
         "OME-Arrow chunk-level and Parquet container compression benchmark\n"
-        "7 configurations (bar colors) × 4 OME-IRIS datasets (x-axis groups)",
+        "Each panel shows the same 7 compression configurations (bar colors) × 4 OME-IRIS datasets (x-axis groups)\n"
+        "measured on a different metric (y-axis)",
         fontsize=16,
     )
     for ax, (metric, title) in zip(axes, metrics):

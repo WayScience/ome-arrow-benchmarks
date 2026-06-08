@@ -63,6 +63,7 @@ The same 15 images are converted into four formats — OME-Arrow Parquet nested 
 **How to read this figure:** the bars are grouped by dataset (x-axis) and colored by format. Compare formats within each dataset group to understand relative trade-offs; compare across dataset groups to check whether the pattern holds for different image types and sizes.
 
 OA NT and OA DS are competitive with OME-TIFF and OME-Zarr for write time.
+Write time for OME-TIFF here reflects conversion from source TIFF to OME-TIFF — in later benchmarks where TIFF is used as the source reference rather than a conversion target, it has no write bar.
 For read time, OME-TIFF has an advantage for raw pixel throughput because it avoids Arrow's struct materialization overhead.
 File size varies by dataset because OME-IRIS datasets differ in image count, resolution, and bit-depth — they are not directly normalized per image here.
 
@@ -102,7 +103,7 @@ The chunk-row API returns raw Arrow table rows rather than decoded NumPy arrays;
 ### Leaf compression sweep
 
 Sweeps seven combinations of chunk-level byte compression (none, Zstd-1, Zstd-3, Zstd-6, LZ4) and Parquet container compression (none, Zstd) across all four OME-IRIS datasets.
-All five panels show exactly the same 7 configurations × 4 datasets — only the y-axis changes per panel (write time, read-table time, full-decode time, random-decode time, file size).
+All five panels show the same data — the same 7 compression configurations applied to the same 4 datasets — with each panel measuring a different aspect: write time, read-table time, full-decode time, random-decode time, and file size.
 
 **How to read this figure:** start with the size panel (last row) to understand the compression trade-off, then check the write and decode panels to see the speed cost.
 
