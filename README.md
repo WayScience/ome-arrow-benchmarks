@@ -118,7 +118,7 @@ For most use cases, **chunk-level Zstd-1 with no Parquet container compression**
 
 ![OME-IRIS leaf compression sweep](figures/compare_ome_iris_leaf_compression_summary.png)
 
-### All OME-IRIS image bundles
+### All OME-IRIS image and data collections
 
 Runs the same write/read benchmark across all four datasets in the OME-IRIS catalog simultaneously.
 This tests whether the patterns from the NF1-focused benchmarks above generalize to the JUMP plate, Pediatric Cancer Atlas, and the 3D CellProfiler tutorial images.
