@@ -1671,7 +1671,6 @@ def add_colored_figure_key(
     )
 
 
-
 def plot_3d_results(summary_3d: pd.DataFrame) -> None:
     metrics = [
         ("write_avg_s", "Write all avg (s)", "seconds"),

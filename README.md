@@ -6,7 +6,7 @@ Benchmarking [OME Arrow](https://github.com/WayScience/ome-arrow) through [Apach
 
 OME-Arrow represents microscopy images and their metadata as native Arrow/Parquet columns.
 This lets you run relational queries — joins, filters, aggregations — over bioimage data alongside conventional profiling features, without a separate image server.
-Because OME-Arrow is compliant with multiple storage backends, users can swap between Parquet, Vortex, and Lance depending on their performance or ecosystem requirements — the image data model stays the same.
+Because OME-Arrow is compatible with multiple storage backends, users can swap between Parquet, Vortex, and LanceDB depending on their performance or ecosystem requirements — the image data model stays the same.
 These benchmarks quantify the trade-offs: where OME-Arrow is faster, where it is slower, and what drives the difference.
 
 ## Benchmark datasets
@@ -28,13 +28,13 @@ All are small representative subsets drawn from [`cytomining/CytoDataFrame`](htt
 - **Pixel read performance is competitive.** OA NT (OME-Arrow nested table) Vortex is consistently the fastest read format across all tested datasets — often faster than OME-TIFF. OA NT Parquet matches or beats OME-Zarr in every dataset. OA DS (OMEArrowDataset) Parquet is the slowest OME-Arrow variant but remains in the same order of magnitude as the other formats.
 - **Storage backend is swappable.** OME-Arrow's compliance with multiple backends — [Apache Parquet](https://parquet.apache.org), [Vortex](https://github.com/spiraldb/vortex), and [LanceDB](https://lancedb.com) — means the same image data model works across ecosystems. Users can choose the backend that best fits their performance profile or tooling without changing how images are represented.
 - **Profiling joins are fast.** Joining feature rows to image metadata via an OME-Arrow nested table takes ~4 ms at observation scale (~15 k rows) — comparable to a plain Parquet path join (~3 ms). The small overhead buys structured, queryable image metadata in place of opaque file paths.
-- **Pre-converting eliminates the join entirely.** When profile and image data are already co-located in a single OME-Arrow table, metadata reads drop to ~1 ms — the fastest result measured.
+- **Pre-converting removes the join at query time, at the cost of upfront conversion.** When profile and image data are co-located in a single OME-Arrow table, metadata reads drop to ~1 ms because no join is performed at query time. Pre-conversion is worth considering for read-heavy workloads where the upfront cost amortises quickly.
 - **Chunk-level Zstd-1 is the practical compression default.** Across all tested OME-IRIS datasets, chunk-level Zstd-1 achieves strong size reduction with minimal read overhead. Doubling compression to Zstd-6 shrinks files further but increases write time without meaningfully cutting read time.
 - **Reuse the `OMEArrowDataset` handle.** Keeping the handle open across reads is marginally faster than reopening per call, with the clearest benefit on random single-image reads. The difference is small in the tested datasets but the pattern is consistent.
 
 ## Benchmarks
 
-### Parquet, Vortex, and Lance
+### Parquet, Vortex, and LanceDB
 
 These benchmarks establish a baseline over a synthetic wide table representative of Cell Painting feature data (~100 k rows × ~4 k `float64` columns plus ~50 `string` columns).
 The three backends — [Apache Parquet](https://parquet.apache.org), [Vortex](https://github.com/spiraldb/vortex), and [LanceDB](https://lancedb.com) — are tested for write, read, and random-access latency.
@@ -62,7 +62,7 @@ The same 15 images are converted into four formats — OME-Arrow Parquet nested 
 
 **How to read this figure:** the bars are grouped by dataset (x-axis) and colored by format. Compare formats within each dataset group to understand relative trade-offs; compare across dataset groups to check whether the pattern holds for different image types and sizes.
 
-Notable result: OA NT and OA DS are competitive with OME-TIFF and OME-Zarr for write time.
+OA NT and OA DS are competitive with OME-TIFF and OME-Zarr for write time.
 For read time, OME-TIFF has an advantage for raw pixel throughput because it avoids Arrow's struct materialization overhead.
 File size varies by dataset because OME-IRIS datasets differ in image count, resolution, and bit-depth — they are not directly normalized per image here.
 
@@ -72,7 +72,7 @@ File size varies by dataset because OME-IRIS datasets differ in image count, res
 
 Breaks the NF1 experiment into individual operations across four panels: query time, in-memory result size, rows returned per query, and benchmark artifact storage.
 
-**Query time (top-left):** path joins and OA metadata joins are both in the low-millisecond range at profile scale (~15 k rows). The pre-converted OA metadata scan is fastest. Payload operations — materializing full pixel arrays — are orders of magnitude slower and dominate the right side of the bar chart.
+**Query time (top-left):** path joins and OA metadata joins are both in the low-millisecond range at profile scale (~15 k rows). The pre-converted OA metadata scan is fastest. Payload operations — materializing full pixel arrays — are 10–40× slower than metadata operations and dominate the right side of the bar chart.
 
 **Result size (top-right):** metadata operations return small result tables (kilobytes). Payload operations materialize the full pixel arrays in memory; the OME-Arrow path allocates more memory than TIFF or Zarr because of Arrow's nested struct representation.
 
@@ -86,12 +86,12 @@ Breaks the NF1 experiment into individual operations across four panels: query t
 
 These four configurations hold the image data constant and vary only how the `OMEArrowDataset` API is used: open the handle once or reopen per call; Zstd-compressed chunks or uncompressed.
 
-| Bar label | Meaning |
-|---|---|
-| OA Dataset zstd reopen each call | New `OMEArrowDataset` handle opened per read |
-| OA Dataset zstd keep handle open | Single `OMEArrowDataset` handle reused across all reads |
-| OA Dataset zstd chunk-row API | Raw chunk-row access (returns Arrow table rows, not NumPy arrays) |
-| OA Dataset uncompressed keep handle open | No Zstd compression; handle kept open |
+| Bar label                                | Meaning                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| OA Dataset zstd reopen each call         | New `OMEArrowDataset` handle opened per read                      |
+| OA Dataset zstd keep handle open         | Single `OMEArrowDataset` handle reused across all reads           |
+| OA Dataset zstd chunk-row API            | Raw chunk-row access (returns Arrow table rows, not NumPy arrays) |
+| OA Dataset uncompressed keep handle open | No Zstd compression; handle kept open                             |
 
 **Takeaway for practitioners:** "keep handle open" is marginally faster than "reopen each call", with the most consistent benefit on random single-image reads.
 Uncompressed chunks read faster still, but at the cost of larger files on disk.
@@ -104,7 +104,7 @@ The chunk-row API returns raw Arrow table rows rather than decoded NumPy arrays;
 Sweeps seven combinations of chunk-level byte compression (none, Zstd-1, Zstd-3, Zstd-6, LZ4) and Parquet container compression (none, Zstd) across all four OME-IRIS datasets.
 All five panels show exactly the same 7 configurations × 4 datasets — only the y-axis changes per panel (write time, read-table time, full-decode time, random-decode time, file size).
 
-**How to read this figure:** start with the size panel (bottom-left) to understand the compression trade-off, then check the write and decode panels to see the speed cost.
+**How to read this figure:** start with the size panel (last row) to understand the compression trade-off, then check the write and decode panels to see the speed cost.
 
 Key observations:
 
@@ -156,7 +156,7 @@ uv sync
 uv run python <benchmark file>
 ```
 
-The benchmarks default to ~100,000 rows x ~4,000 columns of `float64` data and ~50 columns of `string` data. Lower `N_ROWS`/`N_COLS` in the config cell if you hit memory pressure (especially before converting to pandas for the CSV benchmark).
+The benchmarks default to ~100,000 rows × ~4,000 columns of `float64` data and ~50 columns of `string` data. Lower `N_ROWS`/`N_COLS` in the config cell if you hit memory pressure (especially before converting to pandas for the CSV benchmark).
 
 An OME-Arrow variant lives at `notebooks/compare_parquet_vortex_lance_ome.py` which adds a single OME image column (random 100x100) alongside the existing columns.
 
