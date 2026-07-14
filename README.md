@@ -32,6 +32,12 @@ All are small representative subsets drawn from [`cytomining/CytoDataFrame`](htt
 - **Chunk-level Zstd-1 is the practical compression default.** Across all tested OME-IRIS datasets, chunk-level Zstd-1 achieves strong size reduction with minimal read overhead. Doubling compression to Zstd-6 shrinks files further but increases write time without meaningfully cutting read time.
 - **Reuse the `OMEArrowDataset` handle.** Keeping the handle open across reads is marginally faster than reopening per call, with the clearest benefit on random single-image reads. The difference is small in the tested datasets but the pattern is consistent.
 
+![OME-Arrow benchmark advantage summary](figures/ome_arrow_advantage_summary.png)
+
+**OME-Arrow accelerates image profiling I/O while adding relational access.** This summary derives from the saved benchmark tables below rather than rerunning experiments. Panels A-B normalize OME-Zarr timings against OME-Arrow and show 6.8-14.7x faster bulk reads with the OME-Arrow nested-table Vortex backend and 1.7-3.4x faster writes with the OME-Arrow nested-table Parquet backend. Panel C shows that OME-Arrow Parquet storage remains comparable to OME-Zarr across representative OME-IRIS datasets. Panels D-E focus on the NF1 Cell Painting join benchmark: OME-Arrow joins 15,000 profile rows to image metadata in ~4 ms, while OME-Zarr does not provide a native relational profile-to-image join, and converted OME-Arrow metadata scans are 8.6x faster than converted OME-Zarr metadata scans.
+
+These speedups arise because OME-Arrow stores image payloads, metadata, and profile-linked identifiers in Arrow-compatible columnar tables rather than separate directory-based image stores plus external path indexes. This reduces file traversal, object traversal, and format-conversion overhead during bulk reads, writes, and metadata scans. Apache Arrow's contiguous columnar buffers also support zero-copy data access and SIMD-friendly execution, creating a path toward CPU/GPU acceleration because downstream tools can operate on memory layouts already suited for vectorized and accelerator-backed computation.
+
 ## Benchmarks
 
 ### Parquet, Vortex, and LanceDB
@@ -165,6 +171,12 @@ The benchmarks default to ~100,000 rows x ~4,000 columns of `float64` data and ~
 An OME-Arrow variant lives at `notebooks/compare_parquet_vortex_lance_ome.py` which adds a single OME image column (random 100x100) alongside the existing columns.
 
 An OME-Arrow-only + OME-Zarr benchmark lives at `src/benchmarks/compare_ome_arrow_only.py`, focusing on table formats that store one OME image column plus directory-per-image TIFF and OME-Zarr comparisons.
+
+The benchmark advantage summary can be regenerated from saved parquet outputs without rerunning benchmarks:
+
+```bash
+uv run python src/benchmarks/plot_ome_arrow_advantage_summary.py
+```
 
 ## Additional validation benchmarks
 
