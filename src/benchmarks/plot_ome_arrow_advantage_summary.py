@@ -33,7 +33,6 @@ GOLD = "#B7791F"
 BROWN = "#6F4E37"
 GRAY = "#6B7280"
 INK = "#111827"
-MUTED = "#4B5563"
 GRID = "#D1D5DB"
 SHADE = "#E5E7EB"
 
@@ -132,8 +131,6 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
         tiff_meta["avg_seconds"] * 1000,
         zarr_meta["avg_seconds"] * 1000,
     ]
-    scan_speedup = zarr_meta["avg_seconds"] / converted_oa_meta["avg_seconds"]
-
     plt.rcParams.update(
         {
             "font.family": "DejaVu Sans",
@@ -144,7 +141,7 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
             "ytick.labelsize": 10,
         }
     )
-    fig = plt.figure(figsize=(14, 10.3), facecolor="white")
+    fig = plt.figure(figsize=(14, 9.4), facecolor="white")
     grid = fig.add_gridspec(2, 3, hspace=0.64, wspace=0.48)
 
     ax_read = fig.add_subplot(grid[0, 0])
@@ -164,19 +161,9 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
     )
     ax_read.axhline(1, color=GRAY, lw=1.2, ls="--")
     ax_read.set_xticks(x, labels)
-    ax_read.set_ylabel("speedup vs OME-Zarr")
+    ax_read.set_ylabel("OME-Arrow speedup vs. OME-Zarr")
     ax_read.set_title("Bulk image reads")
     ax_read.set_ylim(0, max(read_speedup) * 1.23)
-    ax_read.text(
-        0.5,
-        -0.24,
-        "OME-Arrow nested table, Vortex backend",
-        ha="center",
-        va="top",
-        transform=ax_read.transAxes,
-        color=MUTED,
-        fontsize=9,
-    )
     panel_label(ax_read, "A")
     style_axis(ax_read)
 
@@ -189,19 +176,9 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
     )
     ax_write.axhline(1, color=GRAY, lw=1.2, ls="--")
     ax_write.set_xticks(x, labels)
-    ax_write.set_ylabel("speedup vs OME-Zarr")
+    ax_write.set_ylabel("OME-Arrow speedup vs. OME-Zarr")
     ax_write.set_title("Image writes")
     ax_write.set_ylim(0, max(write_speedup) * 1.30)
-    ax_write.text(
-        0.5,
-        -0.24,
-        "OME-Arrow nested table, Parquet backend",
-        ha="center",
-        va="top",
-        transform=ax_write.transAxes,
-        color=MUTED,
-        fontsize=9,
-    )
     panel_label(ax_write, "B")
     style_axis(ax_write)
 
@@ -225,16 +202,6 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
     ax_storage.set_ylabel("storage / OME-Zarr")
     ax_storage.set_title("Storage footprint")
     ax_storage.set_ylim(0, max(storage_ratio) * 1.35)
-    ax_storage.text(
-        0.5,
-        -0.24,
-        "OME-Arrow nested table, Parquet backend",
-        ha="center",
-        va="top",
-        transform=ax_storage.transAxes,
-        color=MUTED,
-        fontsize=9,
-    )
     panel_label(ax_storage, "C")
     style_axis(ax_storage)
 
@@ -269,17 +236,8 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
     ax_join.set_xticks(join_x, join_labels)
     ax_join.set_xlim(-0.45, len(join_labels) - 0.55)
     ax_join.set_ylabel("milliseconds")
-    ax_join.set_title("Profile-scale joins remain low-latency")
+    ax_join.set_title("Profile-to-image metadata joins")
     ax_join.set_ylim(0, max(join_ms) * 1.38)
-    ax_join.text(
-        0.02,
-        0.94,
-        f"{int(oa_join['rows_returned']):,} profile rows joined to image metadata",
-        transform=ax_join.transAxes,
-        color=INK,
-        fontweight="bold",
-        va="top",
-    )
     panel_label(ax_join, "D", x=-0.07)
     style_axis(ax_join)
 
@@ -301,46 +259,18 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
     ax_scan.set_ylabel("milliseconds")
     ax_scan.set_title("Metadata scans")
     ax_scan.set_ylim(0, max(scan_ms) * 1.35)
-    ax_scan.text(
-        0.5,
-        0.92,
-        f"{scan_speedup:.1f}x faster\nthan OME-Zarr",
-        transform=ax_scan.transAxes,
-        color=BROWN,
-        ha="center",
-        va="top",
-        fontweight="bold",
-    )
     panel_label(ax_scan, "E")
     style_axis(ax_scan)
 
     fig.suptitle(
-        "OME-Arrow accelerates image profiling I/O while adding relational access",
+        "OME-Arrow benchmark advantage summary",
         fontsize=19,
         fontweight="bold",
-        y=0.985,
-    )
-    fig.text(
-        0.5,
-        0.932,
-        "Saved benchmark results normalized against OME-Zarr across representative OME-IRIS image datasets",
-        ha="center",
-        fontsize=12,
-        color=MUTED,
-    )
-    fig.text(
-        0.5,
-        0.035,
-        "Panels A-B report OME-Zarr time divided by OME-Arrow time; values above 1 favor OME-Arrow. "
-        "Panel C reports OME-Arrow Parquet storage divided by OME-Zarr storage. "
-        "Panels D-E use the NF1 Cell Painting join benchmark.",
-        ha="center",
-        fontsize=9,
-        color=MUTED,
+        y=0.97,
     )
 
     FIGURES_DIR.mkdir(exist_ok=True)
-    fig.subplots_adjust(top=0.86, bottom=0.12, left=0.07, right=0.98)
+    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.07, right=0.98)
     fig.savefig(PLOT_PNG, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
