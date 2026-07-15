@@ -41,18 +41,25 @@ Size and experimental-design considerations:
 
 > Read this section for a quick summary. The individual benchmark sections below provide the full picture.
 
-- **OME-Arrow reads and writes faster than OME-Zarr, which matters for image-profiling workflows.** OA NT (OME-Arrow nested table) Parquet writes 2.6–3.4x faster than OME-Zarr and reads 20–50% faster when reading all images in a dataset. OA NT Vortex is 6–14x faster than OME-Zarr for multi-image reads. In image-based profiling pipelines - where a single Cell Painting experiment may involve thousands of images - faster multi-image reads directly reduce the wall time of feature extraction, QC, and model training. For random single-image access, OA NT Parquet is slower than OME-Zarr, but OA NT Vortex and Lance are both faster. OA DS (OMEArrowDataset) Parquet is the slowest OME-Arrow variant but remains comparable to OME-Zarr.
+- **OME-Arrow reads and writes faster than OME-Zarr** OA NT (OME-Arrow nested table) Parquet writes 2.6–3.4x faster than OME-Zarr and reads 20–50% faster when reading all images in a dataset. OA NT Vortex is 6–14x faster than OME-Zarr for multi-image reads. In image-based profiling pipelines - where a single Cell Painting experiment may involve thousands of images - faster multi-image reads directly reduce the wall time of feature extraction, QC, and model training. 
+- For random single-image access, OA NT Parquet is slower than OME-Zarr, but OA NT Vortex and Lance are both faster. OA DS (OMEArrowDataset) Parquet is the slowest OME-Arrow variant but remains comparable to OME-Zarr.
 - **OME-Arrow enables queries that OME-Zarr cannot, and fits existing data science tooling.** Because images and feature profiles are stored together in a single Arrow table, downstream tools can filter on metadata, join profile rows to pixel data, and run SQL or Arrow compute expressions without opening individual files. At plate scale this removes a whole class of file-management overhead that per-directory formats like OME-Zarr require. Arrow and Parquet are standard formats in data science tooling - [DuckDB](https://duckdb.org), [pandas](https://pandas.pydata.org), [Polars](https://pola.rs), and [PyArrow](https://arrow.apache.org/docs/python/) all work with OME-Arrow tables natively, without special adapters. This also means profiles and images share one type system and one file, replacing the two-format world (feature Parquet + image directories) typical in Cell Painting pipelines today.
-- **Profile-to-image joins are fast.** Joining feature rows to image metadata via an OME-Arrow nested table takes ~4 ms for ~15 k repeated morphology-profile rows - comparable to a plain Parquet path join (~3 ms). The small overhead buys structured, queryable image metadata in place of opaque file paths.
+- **Profile-to-image joins are fast.** Joining feature rows (i.e., morphology profiles) to image metadata via an OME-Arrow nested table takes ~4 ms for ~15 k feature rows - comparable to a plain Parquet path join (~3 ms). The small overhead provides structured, queryable image metadata in place of brittle and often opaque file paths.
 - **Pre-converting removes the join at query time, at the cost of upfront conversion.** When profile and image data are co-located in a single OME-Arrow table, metadata reads drop to ~1 ms because no join is performed at query time. Pre-conversion is worth considering for read-heavy workloads where the upfront cost amortises quickly.
 - **Chunk-level Zstd-1 is the practical compression default.** Across all tested OME-IRIS datasets, chunk-level Zstd-1 achieves strong size reduction with minimal read overhead. Doubling compression to Zstd-6 shrinks files further but increases write time without meaningfully cutting read time.
 - **Reuse the `OMEArrowDataset` handle.** Keeping the handle open across reads is marginally faster than reopening per call, with the clearest benefit on random single-image reads. The difference is small in the tested datasets but the pattern is consistent.
 
 ![OME-Arrow benchmark advantage summary](figures/ome_arrow_advantage_summary.png)
 
-**OME-Arrow accelerates image profiling I/O while adding relational access.** This summary derives from the saved benchmark tables below rather than rerunning experiments. Panels A-B normalize OME-Zarr timings against OME-Arrow and show 6.8-14.7x faster bulk reads with the OME-Arrow nested-table Vortex backend and 1.7-3.4x faster writes with the OME-Arrow nested-table Parquet backend. Panel C shows that OME-Arrow Parquet storage remains comparable to OME-Zarr across representative OME-IRIS datasets. Panels D-E focus on the NF1 Cell Painting join benchmark: 15,000 repeated morphology-profile rows are joined to image metadata, not a full population-scale screen. OME-Arrow performs this join in ~4 ms, while OME-Zarr does not provide a native relational profile-to-image join; converted OME-Arrow metadata scans are 8.6x faster than converted OME-Zarr metadata scans.
+**OME-Arrow accelerates image analysis I/O while adding relational access.** 
 
-These speedups arise because OME-Arrow stores image payloads, metadata, and profile-linked identifiers in Arrow-compatible columnar tables rather than separate directory-based image stores plus external path indexes. This reduces file traversal, object traversal, and format-conversion overhead during bulk reads, writes, and metadata scans. Apache Arrow's contiguous columnar buffers also support zero-copy data access and SIMD-friendly execution, creating a path toward CPU/GPU acceleration because downstream tools can operate on memory layouts already suited for vectorized and accelerator-backed computation.
+- Panels A-B compare OME-Zarr timings against OME-Arrow and show 6.8-14.7x faster bulk reads with the OME-Arrow nested-table Vortex backend and 1.7-3.4x faster writes with the OME-Arrow nested-table Parquet backend. 
+- Panel C shows that OME-Arrow Parquet storage remains comparable to OME-Zarr across representative OME-IRIS datasets. 
+- Panels D-E focus on the NF1 Cell Painting join benchmark: We perform a 15,000 feature rows join to images. OME-Arrow performs this join in ~4 ms, while OME-Zarr does not provide this functionality; converted OME-Arrow metadata scans are 8.6x faster than converted OME-Zarr metadata scans.
+
+These speedups arise because OME-Arrow stores image payloads, metadata, and profile-linked identifiers in Arrow-compatible columnar tables rather than separate directory-based image stores plus external path indexes. 
+This reduces file traversal, object traversal, and format-conversion overhead during bulk reads, writes, and metadata scans.
+Apache Arrow's contiguous columnar buffers also support zero-copy data access and SIMD-friendly execution, creating a path toward CPU/GPU acceleration because downstream tools can operate on memory layouts already suited for vectorized and accelerator-backed computation.
 
 ## Benchmarks
 
@@ -98,7 +105,9 @@ File size varies by dataset because OME-IRIS datasets differ in image count, res
 
 Breaks the NF1 experiment into individual operations across four panels: query time, in-memory result size, rows returned per query, and benchmark artifact storage.
 
-**Query time (top-left):** path joins and OA metadata joins are both in the low-millisecond range for ~15 k repeated morphology-profile rows. The pre-converted OA metadata scan is fastest. Payload operations - materializing full pixel arrays - are 10–40x slower than metadata operations and dominate the right side of the bar chart.
+**Query time (top-left):** path joins and OA metadata joins are both in the low-millisecond range for ~15 k morphology feature rows.
+The pre-converted OA metadata scan is fastest.
+Payload operations - materializing full pixel arrays - are 10–40x slower than metadata operations and dominate the right side of the bar chart.
 
 **Result size (top-right):** metadata operations return small result tables (kilobytes). Payload operations materialize the full pixel arrays in memory; the OME-Arrow path allocates more memory than TIFF or Zarr because of Arrow's nested struct representation.
 
