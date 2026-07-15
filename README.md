@@ -14,21 +14,12 @@ These benchmarks quantify the trade-offs: where OME-Arrow is faster, where it is
 The real-image benchmarks use four datasets from the [OME-IRIS](https://github.com/WayScience/ome-iris) catalog.
 All are small representative subsets drawn from [`cytomining/CytoDataFrame`](https://github.com/cytomining/CytoDataFrame) test data; they are not full plates or full studies.
 
-| OME-IRIS dataset ID         | Images | Channels           | Dimensionality | Description                                                                             | Upstream source                                                                                                                              |
-| --------------------------- | ------ | ------------------ | -------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nf1-cellpainting-shrunken` | 15     | 3 (DAPI, GFP, RFP) | 2D             | 5 sites from 1 well of an NF1 fibroblast Cell Painting assay; includes feature profiles | [CytoDataFrame NF1](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/NF1_cellpainting_data_shrunken)               |
-| `jump-plate-example`        | 3      | 3 (ch2, ch3, ch5)  | 2D             | 1 field of view from JUMP Cell Painting plate BR00117006                                | [CytoDataFrame JUMP BR00117006](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/JUMP_plate_BR00117006)            |
-| `pediatric-cancer-atlas`    | 6      | 3 (ch1, ch2, ch3)  | 2D             | 2 fields from a pediatric cancer atlas Cell Painting plate; includes feature profiles   | [CytoDataFrame pediatric atlas](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/pediatric_cancer_atlas_profiling) |
-| `nuclei-3d`                 | 4      | 1                  | 3D             | CellProfiler tutorial 3D noise nuclei segmentation volumes (~13 MB each)                | [CytoDataFrame 3D nuclei](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/CP_tutorial_3D_noise_nuclei_segmentation)         |
-
-The summary figure below uses these saved benchmark artifact sizes:
-
-| Figure label | Dataset purpose/design                                       | Image tensor shape    | Images | TIFF ref (MB) | OME-Zarr (MB) | OA NT Parquet (MB) |
-| ------------ | ------------------------------------------------------------ | --------------------- | ------ | ------------- | ------------- | ------------------ |
-| 3D nuclei    | CellProfiler tutorial 3D nuclei segmentation volumes         | TCZYX=1x1x100x258x258 | 4      | 50.88         | 20.87         | 23.43              |
-| JUMP         | Single field from JUMP Cell Painting plate BR00117006        | TCZYX=1x1x1x1080x1080 | 3      | 7.65          | 5.49          | 5.72               |
-| NF1          | NF1 fibroblast Cell Painting subset with morphology profiles | TCZYX=1x1x1x904x1224  | 15     | 10.06         | 9.52          | 12.51              |
-| Ped. atlas   | Pediatric cancer atlas Cell Painting subset with profiles    | TCZYX=1x1x1x1080x1080 | 6      | 11.65         | 9.20          | 10.00              |
+| Figure label | OME-IRIS dataset ID         | Purpose/design                                               | Image tensor shape    | TIFF ref (MB) | Upstream source                                                                                                                              |
+| ------------ | --------------------------- | ------------------------------------------------------------ | --------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| NF1          | `nf1-cellpainting-shrunken` | NF1 fibroblast Cell Painting subset with morphology profiles | TCZYX=1x1x1x904x1224  | 10.06         | [CytoDataFrame NF1](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/NF1_cellpainting_data_shrunken)               |
+| JUMP         | `jump-plate-example`        | Single field from JUMP Cell Painting plate BR00117006        | TCZYX=1x1x1x1080x1080 | 7.65          | [CytoDataFrame JUMP BR00117006](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/JUMP_plate_BR00117006)            |
+| Ped. atlas   | `pediatric-cancer-atlas`    | Pediatric cancer atlas Cell Painting subset with profiles    | TCZYX=1x1x1x1080x1080 | 11.65         | [CytoDataFrame pediatric atlas](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/cytotable/pediatric_cancer_atlas_profiling) |
+| 3D nuclei    | `nuclei-3d`                 | CellProfiler tutorial 3D nuclei segmentation volumes         | TCZYX=1x1x100x258x258 | 50.88         | [CytoDataFrame 3D nuclei](https://github.com/cytomining/CytoDataFrame/tree/main/tests/data/CP_tutorial_3D_noise_nuclei_segmentation)         |
 
 Size and experimental-design considerations:
 
