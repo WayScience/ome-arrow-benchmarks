@@ -141,8 +141,8 @@ def plot_advantage(summary: pd.DataFrame, joins: pd.DataFrame) -> None:
             "ytick.labelsize": 10,
         }
     )
-    fig = plt.figure(figsize=(14, 9.4), facecolor="white")
-    grid = fig.add_gridspec(2, 3, hspace=0.64, wspace=0.48)
+    fig = plt.figure(figsize=(14, 8.6), facecolor="white")
+    grid = fig.add_gridspec(2, 3, hspace=0.36, wspace=0.48)
 
     ax_read = fig.add_subplot(grid[0, 0])
     ax_write = fig.add_subplot(grid[0, 1])
