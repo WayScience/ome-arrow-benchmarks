@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import gc
 import importlib.metadata as importlib_metadata
-import importlib.resources as resources
 import shutil
 import time
+from importlib import resources
 from pathlib import Path
 
 import duckdb
 import lancedb
 import matplotlib.pyplot as plt
 import numpy as np
+import OME_IRIS
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -31,13 +32,10 @@ import vortex
 import vortex.io as vxio
 import zarr
 from matplotlib.patches import Patch
-from ome_zarr.writer import write_image
 from ome_arrow import OMEArrow, OMEArrowDataset, from_numpy, write_ome_arrow_dataset
-from ome_arrow.meta import OME_ARROW_BYTE_STRUCT
-from ome_arrow.meta import OME_ARROW_STRUCT
-
-import OME_IRIS
+from ome_arrow.meta import OME_ARROW_BYTE_STRUCT, OME_ARROW_STRUCT
 from OME_IRIS.fetch import fetch_datasets
+from ome_zarr.writer import write_image
 
 pd.set_option("display.precision", 4)
 
@@ -130,7 +128,7 @@ def cache_is_current() -> bool:
             FORMAT_SUMMARY_PARQUET, columns=["benchmark_version"]
         )
         summary_3d = pd.read_parquet(SUMMARY_3D_PARQUET, columns=["benchmark_version"])
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         return False
     return bool(
         (summary["benchmark_version"] == BENCHMARK_VERSION).all()
@@ -480,7 +478,7 @@ def read_ome_arrow_lance_random_payload(
             .to_arrow()
             .select(["image_key", "ome_image"])
         )
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         table = db.open_table("images").to_arrow().select(["image_key", "ome_image"])
         wanted = set(image_keys)
         indices = [
@@ -1097,9 +1095,11 @@ def run_3d_benchmarks(dataset_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         size_mb = path_size_bytes(cfg["path"]) / (1024 * 1024)
         state = cfg["open"]()
         measurements = {
-            "read_all": timed_callable(lambda: cfg["read_all"](state)),
-            "read_plane": timed_callable(lambda: cfg["read_plane"](state)),
-            "read_subvolume": timed_callable(lambda: cfg["read_subvolume"](state)),
+            "read_all": timed_callable(lambda _c=cfg, _s=state: _c["read_all"](_s)),
+            "read_plane": timed_callable(lambda _c=cfg, _s=state: _c["read_plane"](_s)),
+            "read_subvolume": timed_callable(
+                lambda _c=cfg, _s=state: _c["read_subvolume"](_s)
+            ),
         }
         for kind, values in {"write": write_times, **measurements}.items():
             for run_idx, seconds in enumerate(values):

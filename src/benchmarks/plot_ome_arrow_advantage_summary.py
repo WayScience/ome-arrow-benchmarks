@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-
 DATA_DIR = Path("data")
 FIGURES_DIR = Path("figures")
 PLOT_PNG = FIGURES_DIR / "ome_arrow_advantage_summary.png"
