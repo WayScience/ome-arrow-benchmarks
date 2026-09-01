@@ -10,22 +10,21 @@ from __future__ import annotations
 
 import gc
 import importlib.metadata as importlib_metadata
-import importlib.resources as resources
 import shutil
 import time
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+import OME_IRIS
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import tifffile
 from ome_arrow import from_numpy, to_numpy
 from ome_arrow.meta import OME_ARROW_BYTE_STRUCT
-
-import OME_IRIS
 from OME_IRIS.fetch import fetch_datasets
 
 DATA_DIR = Path("data")
@@ -103,7 +102,7 @@ def cache_is_current() -> bool:
         return False
     try:
         summary = pd.read_parquet(SUMMARY_PARQUET, columns=["benchmark_version"])
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         return False
     return bool((summary["benchmark_version"] == BENCHMARK_VERSION).all())
 
@@ -267,9 +266,11 @@ def benchmark_dataset(dataset_dir: Path, image_paths: list[Path]):
                 }
             )
         size_mb = path_size_bytes(output_path) / (1024 * 1024)
-        read_times = timed(lambda: read_table(output_path))
-        decode_times = timed(lambda: decode_table(output_path))
-        random_decode_times = timed(lambda: decode_table(output_path, random_indices))
+        read_times = timed(lambda _p=output_path: read_table(_p))
+        decode_times = timed(lambda _p=output_path: decode_table(_p))
+        random_decode_times = timed(
+            lambda _p=output_path, _r=random_indices: decode_table(_p, _r)
+        )
         for kind, values in (
             ("read_table", read_times),
             ("decode_all", decode_times),

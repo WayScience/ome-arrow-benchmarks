@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import gc
 import importlib.metadata as importlib_metadata
-import importlib.resources as resources
 import shutil
 import time
+from importlib import resources
 from pathlib import Path
 
 import lancedb
 import matplotlib.pyplot as plt
 import numpy as np
+import OME_IRIS
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -30,10 +31,8 @@ import vortex.io as vxio
 import zarr
 from ome_arrow import OMEArrowDataset, from_numpy, write_ome_arrow_dataset
 from ome_arrow.meta import OME_ARROW_BYTE_STRUCT
-from ome_zarr.writer import write_image
-
-import OME_IRIS
 from OME_IRIS.fetch import fetch_datasets
+from ome_zarr.writer import write_image
 
 DATA_DIR = Path("data")
 OME_IRIS_DATA_DIR = DATA_DIR / "ome_iris_all"
@@ -60,7 +59,7 @@ def cache_is_current() -> bool:
         return False
     try:
         summary = pd.read_parquet(SUMMARY_PARQUET, columns=["benchmark_version"])
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         return False
     return bool((summary["benchmark_version"] == BENCHMARK_VERSION).all())
 
