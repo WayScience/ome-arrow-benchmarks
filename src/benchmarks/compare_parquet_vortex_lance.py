@@ -14,14 +14,14 @@ import shutil
 import time
 from pathlib import Path
 
+import duckdb
+import lancedb
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import pyarrow as pa
-import pyarrow.parquet as pq
 import pyarrow.dataset as ds
-import lancedb
-import duckdb
+import pyarrow.parquet as pq
 import vortex
 import vortex.io as vxio
 
@@ -210,7 +210,7 @@ def reset_lance_table(db, table_name):
             else:
                 drop_path(LANCE_PATH)
                 return lancedb.connect(LANCE_PATH)
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         drop_path(LANCE_PATH)
         return lancedb.connect(LANCE_PATH)
     return db
@@ -268,7 +268,7 @@ def parquet_random_read(path=PARQUET_PATH, indices=None):
         dataset = ds.dataset(path, format="parquet")
         filt = ds.field("row_id").isin(pa.array(indices, type=pa.int64()))
         return dataset.to_table(filter=filt)
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         return pq.read_table(path).take(indices)
 
 
@@ -285,7 +285,7 @@ def lance_random_read(path=LANCE_PATH, table_name=LANCE_TABLE, indices=None):
     table = LANCE_DB.open_table(table_name)
     try:
         return table.query().where(f"row_id IN ({idx_list})").to_arrow()
-    except Exception:
+    except Exception:  # noqa: BLE001  # benchmark fallback
         return table.to_arrow().take(indices)
 
 
@@ -312,8 +312,8 @@ def vortex_random_read(path=VORTEX_PATH, indices=None):
             break
     if not collected:
         return pa.Table.from_arrays([], names=[])
-    arrays = [pa.array(collected[name]) for name in collected.keys()]
-    return pa.Table.from_arrays(arrays, names=list(collected.keys()))
+    arrays = [pa.array(collected[name]) for name in collected]
+    return pa.Table.from_arrays(arrays, names=list(collected))
 
 
 def duck_random_read(path=DUCK_PATH, table_name=DUCK_TABLE, indices=None):
