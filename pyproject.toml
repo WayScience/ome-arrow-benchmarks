@@ -16,27 +16,27 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "duckdb>=1.5.3",
-  "jupyterlab>=4.5.7",
-  "jupytext>=1.19.3",
-  "lancedb>=0.30.2",
-  "matplotlib>=3.10.9",
+  "duckdb>=1.5.5",
+  "jupyterlab>=4.6.2",
+  "jupytext>=1.19.5",
+  "lancedb>=0.34",
+  "matplotlib>=3.11.1",
   "numcodecs>=0.16.5",
   "numpy>=2.4.6",
-  "ome-arrow>=0.0.10",
-  "ome-iris>=0.0.4",
+  "ome-arrow>=0.1",
+  "ome-iris>=0.0.5",
   "ome-zarr>=0.16",
-  "pandas>=3.0.3",
-  "poethepoet>=0.46",
-  "pyarrow>=24",
+  "pandas>=3.0.5",
+  "poethepoet>=0.48",
+  "pyarrow>=25",
   "tifffile>=2026.3.3",
-  "vortex-data>=0.73",
+  "vortex-data>=0.83",
   "zarr>=3.1.6",
 ]
 
 [dependency-groups]
 dev = [
-  "poethepoet>=0.46",
+  "poethepoet>=0.48",
 ]
 
 [tool.uv]
